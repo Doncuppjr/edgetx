@@ -463,6 +463,14 @@ void Bluetooth::wakeup()
     initResetHold = false;
     initObservedState = 0xff;
   }
+  // Drain trainer data at the frequent mixer cadence (~5 ms) rather
+  // than the Bluetooth command-state cadence (~50 ms). AT setup and
+  // connection management remain on the existing wakeup schedule.
+  if (state == BLUETOOTH_STATE_CONNECTED &&
+      g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
+      g_model.trainerData.mode == TRAINER_MODE_MASTER_BLUETOOTH) {
+    receiveTrainer();
+  }
   if (initExhausted) return;
   if (now < wakeupTime) return;
 
