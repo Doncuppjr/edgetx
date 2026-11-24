@@ -125,6 +125,12 @@ static void gpsSendMessage(uint16_t msg_type, uint16_t msg_len,
   gpsSerialDrv->sendByte(gpsSerialCtx, ck_b);
 }
 
+// NAV-SAT is usually larger than the 100-byte navigation parser buffer.
+// Accumulate only the small diagnostics required while checksumming its stream.
+static uint8_t satCount = 0, satMaxCn0 = 0, satUsed = 0;
+static uint8_t monVerLen = 0;
+static char monVer[31];
+
 static void configureGps(bool detect)
 {
   static int state = 0;
@@ -137,6 +143,7 @@ static void configureGps(bool detect)
   switch (state) {
     case 0:
       gpsSendMessage(0x0a04, 0, nullptr);
+      gpsSendMessage(0x0135, 0, nullptr);  // UBX-NAV-SAT poll (read-only)
       ubxCfgMsg_t val;
       val.msgClass = 0x01;
       val.msgID = 0x07;
@@ -146,13 +153,22 @@ static void configureGps(bool detect)
       gpsSendMessage(0x0601, sizeof(ubxCfgMsg_t), (uint8_t*)&val);
       state++;
   }
+  // Poll satellite reception every ~3s; no persistent receiver changes.
+  static tmr10ms_t lastSatPoll = 0;
+  if (!detect && get_tmr10ms() - lastSatPoll >= 300) {
+    lastSatPoll = get_tmr10ms();
+    if (!txCompleted || txCompleted(gpsSerialCtx))
+      gpsSendMessage(0x0135, 0, nullptr);
+  }
 }
 
 static void gpsProcessMessage(uint16_t msg_type, uint16_t msg_len,
                               uint8_t* payload)
 {
-  if (msg_type == 0x0107) {
+  if (msg_type == 0x0107 && msg_len >= 92) {
     auto pvt = (ubxNavPvt_t*)payload;
+    gpsData.ubxPvtCount++;
+    gpsData.ubxFixType = pvt->fixType;
     gpsData.fix = pvt->flags & 0x01;
     gpsData.numSat = pvt->numSV;
     gpsData.speed = pvt->gSpeed / 100;            // speed in 0.1m/s
@@ -173,7 +189,7 @@ static void gpsProcessMessage(uint16_t msg_type, uint16_t msg_len,
 #endif
   }
 
-  if (msg_type == 0x0104) {
+  if (msg_type == 0x0104 && msg_len >= sizeof(ubxNavDop_t)) {
     auto dop = (ubxNavDop_t*)payload;
     gpsData.hdop = dop->hdop;
   }
@@ -189,6 +205,9 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
   static uint16_t msg_len;
   static uint16_t msg_pos;
   static uint8_t buf[BUFFER_SIZE];
+  static bool streamSat = false, streamVersion = false;
+  static uint8_t navSatTotal = 0;
+  static uint32_t satFlags = 0;
   static uint8_t ck_a;
   static uint8_t ck_b;
 
@@ -226,11 +245,20 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
       ck_b += (ck_a += c);
       msg_len |= c << 8;
       msg_pos = 0;
+      streamSat = msg_type == 0x0135 && msg_len >= 8 && msg_len <= 2048;
+      streamVersion = msg_type == 0x0a04 && msg_len >= 30 && msg_len <= 1024;
+      if (streamSat) {
+        satCount = satMaxCn0 = satUsed = navSatTotal = 0;
+      }
+      if (streamVersion) {
+        monVerLen = 0;
+      }
       if (msg_len == 0) {
         state = 7;
         break;
       }
-      if ((msg_type != 0x0107 && msg_type != 0x0104) || msg_len > BUFFER_SIZE) {
+      if (!streamSat && !streamVersion &&
+          ((msg_type != 0x0107 && msg_type != 0x0104) || msg_len > BUFFER_SIZE)) {
         state = 9;
         break;
       }
@@ -238,7 +266,27 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
       break;
     case 6:  // Get payload
       ck_b += (ck_a += c);
-      buf[msg_pos++] = c;
+      if (streamSat) {
+        if (msg_pos == 5) navSatTotal = c;
+        if (msg_pos >= 8 && (msg_pos - 8) / 12 < navSatTotal) {
+          uint32_t field = (msg_pos - 8) % 12;
+          if (field == 2) {
+            if (c > satMaxCn0) satMaxCn0 = c;
+            if (c > 0) satCount++;
+          }
+          if (field >= 8 && field <= 11) {
+            if (field == 8) satFlags = 0;
+            satFlags |= uint32_t(c) << (8 * (field - 8));
+            if (field == 11 && (satFlags & (1u << 3))) satUsed++;
+          }
+        }
+      } else if (streamVersion && msg_pos < 30) {
+        monVer[msg_pos] = c;
+        monVerLen = msg_pos + 1;
+      } else if (!streamVersion) {
+        buf[msg_pos] = c;
+      }
+      msg_pos++;
       if (msg_pos >= msg_len) {
         state = 7;
       }
@@ -253,7 +301,18 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
       break;
     case 8:  // Get checksum 2, end of frame
       if (c == ck_b) {
-        gpsProcessMessage(msg_type, msg_len, buf);
+        if (streamSat) {
+          gpsData.ubxSatCount++;
+          gpsData.ubxSatsVisible = navSatTotal;
+          gpsData.ubxMaxCn0 = satMaxCn0;
+          gpsData.ubxSatsUsed = satUsed;
+        } else if (streamVersion) {
+          for (int i = 0; i < monVerLen && i < 30; i++)
+            gpsData.ubxVersion[i] = monVer[i];
+          gpsData.ubxVersion[monVerLen < 30 ? monVerLen : 30] = 0;
+        } else {
+          gpsProcessMessage(msg_type, msg_len, buf);
+        }
         gpsData.packetCount++;
         result = true;
       } else {

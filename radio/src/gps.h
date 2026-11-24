@@ -35,6 +35,13 @@ struct gpsdata_t
   uint32_t gsvCount;
   uint8_t satsInView;
   uint8_t maxCn0;
+  uint32_t ubxPvtCount;
+  uint32_t ubxSatCount;
+  uint8_t ubxFixType;
+  uint8_t ubxSatsVisible;
+  uint8_t ubxMaxCn0;
+  uint8_t ubxSatsUsed;
+  char ubxVersion[31];
   uint32_t errorCount;
   int32_t altitude;               // altitude in 0.1m
   uint16_t speed;                 // speed in 0.1m/s

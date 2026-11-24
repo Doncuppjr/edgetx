@@ -1697,7 +1697,25 @@ int cliShowJitter(const char ** argv)
 int cliGps(const char ** argv)
 {
 
-  if (argv[1][0] == '$') {
+  if (strcmp(argv[1], "status") == 0) {
+    int port = serialGetModePort(UART_MODE_GPS);
+    cliSerialPrint("GPS protocol=%u baud=%lu packets=%lu errors=%lu",
+                   unsigned(gpsGetProtocol()),
+                   (unsigned long)(port >= 0 ? serialGetBaudrate(port) : 0),
+                   (unsigned long)gpsData.packetCount,
+                   (unsigned long)gpsData.errorCount);
+    cliSerialPrint("GPS fix=%u used=%u hdop=%u NMEA_GGA=%lu NMEA_GSV=%lu",
+                   unsigned(gpsData.fix), unsigned(gpsData.numSat),
+                   unsigned(gpsData.hdop), (unsigned long)gpsData.ggaCount,
+                   (unsigned long)gpsData.gsvCount);
+    cliSerialPrint("UBX PVT=%lu fixType=%u NAV-SAT=%lu visible=%u CN0max=%u used=%u",
+                   (unsigned long)gpsData.ubxPvtCount, unsigned(gpsData.ubxFixType),
+                   (unsigned long)gpsData.ubxSatCount,
+                   unsigned(gpsData.ubxSatsVisible), unsigned(gpsData.ubxMaxCn0),
+                   unsigned(gpsData.ubxSatsUsed));
+    cliSerialPrint("UBX version=%s", gpsData.ubxVersion[0] ? gpsData.ubxVersion : "not received");
+  }
+  else if (argv[1][0] == '$') {
     // send command to GPS
     gpsSendFrame(argv[1]);
   }
@@ -1887,7 +1905,7 @@ const CliCommand cliCommands[] = {
   { "jitter", cliShowJitter, "" },
 #endif
 #if defined(INTERNAL_GPS)
-  { "gps", cliGps, "<baudrate>|$<command>|trace" },
+  { "gps", cliGps, "status|$<command>|trace" },
 #endif
 #if defined(SPACEMOUSE)
   { "spacemouse", cliSpaceMouse, "poll | tare | startstreaming | stopstreaming | trace" },
