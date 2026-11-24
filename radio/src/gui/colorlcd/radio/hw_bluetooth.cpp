@@ -65,6 +65,26 @@ class BTDetailsDialog : public BaseDialog
   }
 };
 
+// Only this specific OTA dialog uses Back as a maintenance cancel.
+// Navigating Back anywhere else retains the ordinary EdgeTX behavior.
+class BluetoothOtaDialog : public MessageDialog
+{
+ public:
+  BluetoothOtaDialog()
+    : MessageDialog("Bluetooth update",
+                    "Module update mode. Back returns to Bluetooth.")
+  {
+  }
+
+ protected:
+  void onCancel() override
+  {
+    bluetooth.cancelOta();
+    deleteLater();
+  }
+  void onClicked() override { onCancel(); }
+};
+
 BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& grid)
 {
   auto line = parent->newLine(grid);
@@ -101,8 +121,7 @@ BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& gri
             "Stop Bluetooth and request module firmware update?",
             [=]() {
               bluetooth.requestOta();
-              new MessageDialog("Bluetooth update",
-                  "Request sent. Follow your module's update instructions.");
+              new BluetoothOtaDialog();
             });
         return 0;
       });

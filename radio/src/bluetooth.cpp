@@ -425,6 +425,28 @@ void Bluetooth::requestOta()
   wakeupTime = get_tmr10ms() + BT_INIT_RESET_HOLD;
 }
 
+void Bluetooth::cancelOta()
+{
+  if (!otaRequested &&
+      state != BLUETOOTH_STATE_OTA_WAIT_ACK &&
+      state != BLUETOOTH_STATE_OTA_ACTIVE) return;
+
+  otaRequested = false;
+  // Pulse the existing module enable line (TX15 PH11) to request exit.
+  bluetoothDisable();
+  state = BLUETOOTH_STATE_OFF;
+  initResetHold = true;
+  initUserOffSeen = false;
+  initAttemptCount = 0;
+  initExhausted = false;
+  initEverCompleted = false;
+  postInitRecoveryUsed = false;
+  initObservedState = 0xff;
+  // Allow adapters time to restart before beginning the UART handshake.
+  // 1.8s HIGH exceeds ANCHOR's debounce and stays below its 2.5s sleep limit.
+  wakeupTime = get_tmr10ms() + 180;
+}
+
 void Bluetooth::wakeup()
 {
   if (state != BLUETOOTH_STATE_OFF) {

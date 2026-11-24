@@ -89,6 +89,7 @@ class Bluetooth
     void forwardTelemetry(const uint8_t * packet);
     void wakeup();
     void requestOta();
+    void cancelOta();
     bool otaRequested = false;
     uint32_t otaRequestTime = 0;
     const char * flashFirmware(const char * filename, ProgressHandler progressHandler);
