@@ -371,6 +371,12 @@ void DebugViewPage::build(Window* window)
     new DebugInfoNumber<uint32_t>(
         line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
         [] { return gpsData.errorCount; }, "Err:");
+    new DebugInfoNumber<uint32_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] {
+          int port = serialGetModePort(UART_MODE_GPS);
+          return port >= 0 ? serialGetBaudrate(port) : 0;
+        }, "Baud:");
   }
 #endif
 
