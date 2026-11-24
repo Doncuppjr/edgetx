@@ -35,6 +35,11 @@ struct gpsdata_t
   uint32_t gsvCount;
   uint8_t satsInView;
   uint8_t maxCn0;
+  uint32_t lastUbxPvtTick; // 10 ms clock; zero indicates unavailable
+  uint32_t lastHdopTick;
+  uint32_t lastGgaTick;
+  uint32_t lastGsvTick;
+  uint32_t lastNavSatTick;
   uint32_t ubxPvtCount;
   uint32_t ubxSatCount;
   uint8_t ubxFixType;
@@ -60,6 +65,11 @@ struct gpsdata_t
 
 extern gpsdata_t gpsData;
 uint8_t gpsGetProtocol();
+// A metric is available only for the current protocol and a fresh source frame.
+bool gpsUbxQualityFresh();
+bool gpsHdopFresh();
+bool gpsNavigationFresh();
+bool gpsRfFresh();
 
 #if defined(DEBUG)
 extern uint8_t gpsTraceEnabled;

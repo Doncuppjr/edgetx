@@ -346,37 +346,46 @@ void DebugViewPage::build(Window* window)
     new DynamicText(
         line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
         [] {
-          return std::string(gpsData.fix ? STR_GPS_FIX_YES : STR_GPS_FIX_NO);
+          bool fresh = gpsGetProtocol() == GPS_PROTOCOL_UBX ?
+            (gpsData.lastUbxPvtTick != 0 &&
+             uint32_t(get_tmr10ms() - gpsData.lastUbxPvtTick) <= 200) :
+            (gpsGetProtocol() == GPS_PROTOCOL_NMEA &&
+             gpsData.lastGgaTick != 0 &&
+             uint32_t(get_tmr10ms() - gpsData.lastGgaTick) <= 200);
+          return std::string(!fresh ? "N/A" :
+                             (gpsData.fix ? STR_GPS_FIX_YES : STR_GPS_FIX_NO));
         });
-    new DebugInfoNumber<uint8_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.numSat; }, STR_GPS_SATS);
-    new DebugInfoNumber<uint16_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.hdop; }, STR_GPS_HDOP);
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("Sat: ") +
+            (gpsNavigationFresh() ? std::to_string(gpsData.numSat) : "N/A"); });
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("HDOP: ") +
+            (gpsHdopFresh() ?
+                std::to_string(gpsData.hdop / 100) + "." +
+                (gpsData.hdop % 100 < 10 ? "0" : "") +
+                std::to_string(gpsData.hdop % 100) : "N/A"); });
 
-    if (gpsGetProtocol() == GPS_PROTOCOL_UBX && gpsData.ubxPvtCount > 0) {
-    // UBX NAV-PVT already supplies quality metrics at no extra GPS bandwidth.
-    // Values are receiver estimates (millimetres), not verified position error.
+    // Only show UBX estimates with a fresh, valid UBX navigation solution.
     line = window->newLine(grid);
     line->padAll(PAD_TINY);
-    new StaticText(line, rect_t{}, "GPS accuracy");
+    new StaticText(line, rect_t{}, "GPS quality");
 #if PORTRAIT
     line = window->newLine(grid2);
     line->padAll(PAD_ZERO);
     line->padLeft(PAD_LARGE);
 #endif
-    new DebugInfoNumber<uint32_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.ubxHAccMm; }, "H(mm):");
-    new DebugInfoNumber<uint32_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.ubxVAccMm; }, "V(mm):");
-    new DebugInfoNumber<uint16_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.ubxPDop; }, "PDOP x100:");
-
-    }
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("H(mm): ") +
+            (gpsUbxQualityFresh() ? std::to_string(gpsData.ubxHAccMm) : "N/A"); });
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("V(mm): ") +
+            (gpsUbxQualityFresh() ? std::to_string(gpsData.ubxVAccMm) : "N/A"); });
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("PDOP: ") +
+            (gpsUbxQualityFresh() ?
+                std::to_string(gpsData.ubxPDop / 100) + "." +
+                (gpsData.ubxPDop % 100 < 10 ? "0" : "") +
+                std::to_string(gpsData.ubxPDop % 100) : "N/A"); });
 
     // GPS fix / satellite / HDOP alone cannot distinguish no serial data
     // from a receiver with no satellite lock. Show parser activity here.
@@ -425,12 +434,14 @@ void DebugViewPage::build(Window* window)
     line->padAll(PAD_ZERO);
     line->padLeft(PAD_LARGE);
 #endif
-    new DebugInfoNumber<uint8_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.satsInView; }, "View:");
-    new DebugInfoNumber<uint8_t>(
-        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
-        [] { return gpsData.maxCn0; }, "C/N0:");
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("View: ") +
+            (gpsRfFresh() ? std::to_string(gpsGetProtocol() == GPS_PROTOCOL_UBX ?
+                gpsData.ubxSatsVisible : gpsData.satsInView) : "N/A"); });
+    new DynamicText(line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return std::string("C/N0: ") +
+            (gpsRfFresh() ? std::to_string(gpsGetProtocol() == GPS_PROTOCOL_UBX ?
+                gpsData.ubxMaxCn0 : gpsData.maxCn0) : "N/A"); });
   }
 #endif
 

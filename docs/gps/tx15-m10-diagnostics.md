@@ -64,3 +64,30 @@ should be implemented without verified response handling.
 Changes relative to the latest TX15 GPS diagnostics baseline include
 `radio/src/gps.h`, `gps_ubx.h`, `gps_ubx.cpp`, `cli.cpp`, and the GPS
 section of `gui/colorlcd/mainview/view_statistics.cpp`.
+
+## Data validity / presentation patch
+
+The diagnostic counters are lifetime counters, not proof of a current fix.
+Navigation and RF measurements now have independent source timestamps and
+expire after 2 seconds without a fresh relevant frame:
+
+- A current valid UBX NAV-PVT fix is required for the hAcc/vAcc/sAcc/PDOP
+  estimates; when missing or stale, the display and CLI show `N/A`.
+- HDOP requires a recent NAV-DOP frame for UBX (or GGA for NMEA). A missing
+  NAV-DOP response **must not** be represented by `HDOP=0`.
+- `NAV-SAT` reception and NMEA GSV each have separate RF timestamps. For the
+  M10 receiver which ACKs NAV-SAT polls but sends no NAV-SAT data, RF signal
+  strength and satellites in view are `N/A`, not `0`.
+- The number of satellites **used** originates in the fresh navigation fix;
+  it must not be mistaken for the unreported number **in view**.
+- Stale fix state displays `N/A`, not "No fix". A fresh, explicit no-fix
+  report is distinct from no current communication.
+- HDOP and PDOP are scaled by 100 in memory and formatted as decimal DOP
+  values on the diagnostic statistics page.
+- Configuration responses are described as command receipt only, with no
+  implication the requested constellation or rate was actually applied.
+
+Two seconds is a conservative diagnostic freshness window, not a universal
+GPS timeout; if supporting low update rates later, widen it appropriately.
+NMEA GSV aggregation remains a basic diagnostic, not a complete list of unique
+satellites across constellations.

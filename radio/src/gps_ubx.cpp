@@ -213,6 +213,7 @@ static void gpsProcessMessage(uint16_t msg_type, uint16_t msg_len,
 {
   if (msg_type == 0x0107 && msg_len >= 92) {
     auto pvt = (ubxNavPvt_t*)payload;
+    gpsData.lastUbxPvtTick = get_tmr10ms();
     gpsData.ubxPvtCount++;
     gpsData.ubxFixType = pvt->fixType;
     gpsData.ubxFixFlags = pvt->flags;
@@ -243,6 +244,7 @@ static void gpsProcessMessage(uint16_t msg_type, uint16_t msg_len,
   if (msg_type == 0x0104 && msg_len >= sizeof(ubxNavDop_t)) {
     auto dop = (ubxNavDop_t*)payload;
     gpsData.hdop = dop->hdop;
+    gpsData.lastHdopTick = get_tmr10ms();
   }
 }
 
@@ -354,6 +356,7 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
     case 8:  // Get checksum 2, end of frame
       if (c == ck_b) {
         if (streamSat) {
+          gpsData.lastNavSatTick = get_tmr10ms();
           gpsData.ubxSatCount++;
           gpsData.ubxSatsVisible = navSatTotal;
           gpsData.ubxMaxCn0 = satMaxCn0;

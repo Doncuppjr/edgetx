@@ -46,6 +46,38 @@
 gpsdata_t gpsData;
 static int gpsProtocol = -1;
 uint8_t gpsGetProtocol() { return gpsProtocol < 0 ? 0 : gpsProtocol; }
+
+static bool gpsRecent(uint32_t tick)
+{
+  return tick != 0 && uint32_t(get_tmr10ms() - tick) <= 200; // 2 seconds
+}
+
+bool gpsUbxQualityFresh()
+{
+  return gpsProtocol == GPS_PROTOCOL_UBX && gpsRecent(gpsData.lastUbxPvtTick) &&
+         gpsData.fix != 0;
+}
+
+bool gpsHdopFresh()
+{
+  return gpsData.fix && gpsData.hdop != 0 && (
+    (gpsProtocol == GPS_PROTOCOL_UBX && gpsRecent(gpsData.lastHdopTick)) ||
+    (gpsProtocol == GPS_PROTOCOL_NMEA && gpsRecent(gpsData.lastGgaTick)));
+}
+
+bool gpsNavigationFresh()
+{
+  return gpsData.fix && (
+    (gpsProtocol == GPS_PROTOCOL_UBX && gpsRecent(gpsData.lastUbxPvtTick)) ||
+    (gpsProtocol == GPS_PROTOCOL_NMEA && gpsRecent(gpsData.lastGgaTick)));
+}
+
+bool gpsRfFresh()
+{
+  return (gpsProtocol == GPS_PROTOCOL_UBX && gpsRecent(gpsData.lastNavSatTick)) ||
+         (gpsProtocol == GPS_PROTOCOL_NMEA && gpsRecent(gpsData.lastGsvTick));
+}
+
 const etx_serial_driver_t* gpsSerialDrv = nullptr;
 void* gpsSerialCtx = nullptr;
 

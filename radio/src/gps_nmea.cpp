@@ -258,6 +258,7 @@ bool gpsNewFrameNMEA(char c)
           gpsData.packetCount++;
           switch (gps_frame) {
             case FRAME_GSV:
+              gpsData.lastGsvTick = get_tmr10ms();
               gpsData.gsvCount++;
               // Across constellations the largest visible group and best
               // signal are useful diagnostic indicators, not a unique sum.
@@ -267,6 +268,7 @@ bool gpsNewFrameNMEA(char c)
               if (gsvMaxCn0 > gpsData.maxCn0) gpsData.maxCn0 = gsvMaxCn0;
               break;
             case FRAME_GGA:
+              gpsData.lastGgaTick = get_tmr10ms();
               gpsData.ggaCount++;
               frameOK = 1;
               gpsData.fix = gps_Msg.fix;

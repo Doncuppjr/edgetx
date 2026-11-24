@@ -1758,24 +1758,41 @@ int cliGps(const char ** argv)
                    (unsigned long)(port >= 0 ? serialGetBaudrate(port) : 0),
                    (unsigned long)gpsData.packetCount,
                    (unsigned long)gpsData.errorCount);
-    cliSerialPrint("GPS fix=%u used=%u hdop=%u NMEA_GGA=%lu NMEA_GSV=%lu",
-                   unsigned(gpsData.fix), unsigned(gpsData.numSat),
-                   unsigned(gpsData.hdop), (unsigned long)gpsData.ggaCount,
+    cliSerialPrint("GPS fix=%s HDOP=%s NMEA_GGA=%lu NMEA_GSV=%lu",
+                   gpsNavigationFresh() ? "valid" : "unavailable/stale",
+                   gpsHdopFresh() ? "available" : "N/A",
+                   (unsigned long)gpsData.ggaCount,
                    (unsigned long)gpsData.gsvCount);
-    cliSerialPrint("UBX PVT=%lu fixType=%u NAV-SAT=%lu visible=%u CN0max=%u used=%u",
+    if (gpsNavigationFresh())
+      cliSerialPrint("GPS satellites used=%u", unsigned(gpsData.numSat));
+    else
+      cliSerialPrint("GPS satellites used=N/A");
+    if (gpsHdopFresh())
+      cliSerialPrint("GPS HDOP=%u (0.01 units)", unsigned(gpsData.hdop));
+    cliSerialPrint("UBX PVT=%lu fixType=%u NAV-SAT frames=%lu RF=%s",
                    (unsigned long)gpsData.ubxPvtCount, unsigned(gpsData.ubxFixType),
                    (unsigned long)gpsData.ubxSatCount,
-                   unsigned(gpsData.ubxSatsVisible), unsigned(gpsData.ubxMaxCn0),
-                   unsigned(gpsData.ubxSatsUsed));
-    cliSerialPrint("UBX accuracy h=%lu mm v=%lu mm speed=%lu mm/s PDOP=%u (0.01) flags=0x%02x",
-                   (unsigned long)gpsData.ubxHAccMm,
-                   (unsigned long)gpsData.ubxVAccMm,
-                   (unsigned long)gpsData.ubxSAccMms,
-                   unsigned(gpsData.ubxPDop), unsigned(gpsData.ubxFixFlags));
-    cliSerialPrint("UBX ACK count=%lu last=%s for %02x/%02x",
-                   (unsigned long)gpsData.ubxAckCount,
-                   gpsData.ubxAckType ? "ACK" : "NAK",
-                   unsigned(gpsData.ubxAckClass), unsigned(gpsData.ubxAckId));
+                   gpsRfFresh() ? "fresh" : "unavailable/stale");
+    if (gpsGetProtocol() == GPS_PROTOCOL_UBX && gpsRfFresh())
+      cliSerialPrint("UBX NAV-SAT visible=%u CN0max=%u used=%u",
+                     unsigned(gpsData.ubxSatsVisible), unsigned(gpsData.ubxMaxCn0),
+                     unsigned(gpsData.ubxSatsUsed));
+    if (gpsUbxQualityFresh()) {
+      cliSerialPrint("UBX estimates H=%lu mm V=%lu mm speed=%lu mm/s PDOP=%u (0.01) flags=0x%02x",
+                     (unsigned long)gpsData.ubxHAccMm,
+                     (unsigned long)gpsData.ubxVAccMm,
+                     (unsigned long)gpsData.ubxSAccMms,
+                     unsigned(gpsData.ubxPDop), unsigned(gpsData.ubxFixFlags));
+    } else {
+      cliSerialPrint("UBX accuracy/PDOP=N/A (no current valid UBX fix)");
+    }
+    if (gpsData.ubxAckCount)
+      cliSerialPrint("UBX ACK count=%lu last=%s for %02x/%02x (receipt only; not applied-state proof)",
+                     (unsigned long)gpsData.ubxAckCount,
+                     gpsData.ubxAckType ? "ACK" : "NAK",
+                     unsigned(gpsData.ubxAckClass), unsigned(gpsData.ubxAckId));
+    else
+      cliSerialPrint("UBX ACK=N/A (none received)");
     cliSerialPrint("UBX version=%s", gpsData.ubxVersion[0] ? gpsData.ubxVersion : "not received");
   }
   else if (!strcmp(argv[1], "rate")) {
@@ -1785,7 +1802,7 @@ int cliGps(const char ** argv)
         !gpsUbxSetRate((uint8_t)hz)) {
       cliSerialPrint("gps rate: use 1, 2, 5, or 10 Hz with UBX GPS");
     } else {
-      cliSerialPrint("GPS rate request sent (%d Hz, volatile); check ACK and PVT frequency", hz);
+      cliSerialPrint("GPS rate request sent (%d Hz, volatile); NOT VERIFIED; check actual PVT timestamps", hz);
     }
   }
   else if (!strcmp(argv[1], "constellation")) {
@@ -1807,7 +1824,7 @@ int cliGps(const char ** argv)
         !gpsUbxSetConstellation(key, enable)) {
       cliSerialPrint("gps constellation: <gps|sbas|galileo|beidou|qzss|glonass> <on|off> (GPS off blocked)");
     } else {
-      cliSerialPrint("GPS constellation %s %s requested (volatile); check ACK and reacquisition", name, state);
+      cliSerialPrint("GPS constellation %s %s requested (volatile); NOT VERIFIED; check actual reception", name, state);
     }
   }
   else if (argv[1][0] == '$') {
