@@ -59,6 +59,7 @@
 #define NO_FRAME   0
 #define FRAME_GGA  1
 #define FRAME_RMC  2
+#define FRAME_GSV  3
 
 #define DIGIT_TO_VAL(_x)    (_x - '0')
 
@@ -139,12 +140,14 @@ bool gpsNewFrameNMEA(char c)
   static uint8_t param = 0, offset = 0, parity = 0;
   static char string[15];
   static uint8_t checksum_param, gps_frame = NO_FRAME;
+  static uint8_t gsvView = 0, gsvMaxCn0 = 0, gsvSentence = 0;
 
   switch (c) {
     case '$':
       param = 0;
       offset = 0;
       parity = 0;
+      checksum_param = 0;
       break;
     case ',':
     case '*':
@@ -158,21 +161,25 @@ bool gpsNewFrameNMEA(char c)
         else if (string[0] == 'G' && string[2] == 'R' && string[3] == 'M' && string[4] == 'C') {
           gps_frame = FRAME_RMC;
         }
-        else {
-          // turn off this frame (do this only once a second)
-          static gtime_t lastGpsCmdSent = 0;
-          if (string[0] == 'G' && g_rtcTime != lastGpsCmdSent) {
-            lastGpsCmdSent = g_rtcTime;
-            char cmd[] = "$PUBX,40,GSV,0,0,0,0";
-            cmd[9]  = string[2];
-            cmd[10] = string[3];
-            cmd[11] = string[4];
-            gpsSendFrameNMEA(cmd);
-          }
+        else if (string[0] == 'G' && string[2] == 'G' && string[3] == 'S' && string[4] == 'V') {
+          gps_frame = FRAME_GSV;
+          gsvView = gsvMaxCn0 = gsvSentence = 0;
         }
+        // Diagnostic build: do not send proprietary PUBX commands to
+        // disable other NMEA frames (particularly satellite signal GSV).
       }
 
       switch (gps_frame) {
+        case FRAME_GSV:
+          // GSV: total messages, sentence index, sats in view, then
+          // four groups of PRN/elevation/azimuth/CN0.
+          if (param == 2) gsvSentence = grab_fields(string, 0);
+          if (param == 3) gsvView = grab_fields(string, 0);
+          if (param >= 7 && (param - 7) % 4 == 0) {
+            uint8_t cn0 = grab_fields(string, 0);
+            if (cn0 > gsvMaxCn0) gsvMaxCn0 = cn0;
+          }
+          break;
         case FRAME_GGA:        //************* GPGGA FRAME parsing
           switch (param) {
             case 2:
@@ -250,7 +257,17 @@ bool gpsNewFrameNMEA(char c)
         if (checksum == parity) {
           gpsData.packetCount++;
           switch (gps_frame) {
+            case FRAME_GSV:
+              gpsData.gsvCount++;
+              // Across constellations the largest visible group and best
+              // signal are useful diagnostic indicators, not a unique sum.
+              if (gsvSentence == 1 || gsvView > gpsData.satsInView)
+                gpsData.satsInView = gsvView;
+              if (gsvSentence == 1) gpsData.maxCn0 = 0;
+              if (gsvMaxCn0 > gpsData.maxCn0) gpsData.maxCn0 = gsvMaxCn0;
+              break;
             case FRAME_GGA:
+              gpsData.ggaCount++;
               frameOK = 1;
               gpsData.fix = gps_Msg.fix;
               gpsData.numSat = gps_Msg.numSat;

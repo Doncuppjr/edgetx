@@ -45,6 +45,7 @@
 
 gpsdata_t gpsData;
 static int gpsProtocol = -1;
+uint8_t gpsGetProtocol() { return gpsProtocol < 0 ? 0 : gpsProtocol; }
 const etx_serial_driver_t* gpsSerialDrv = nullptr;
 void* gpsSerialCtx = nullptr;
 

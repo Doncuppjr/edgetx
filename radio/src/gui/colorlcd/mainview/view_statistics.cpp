@@ -377,6 +377,37 @@ void DebugViewPage::build(Window* window)
           int port = serialGetModePort(UART_MODE_GPS);
           return port >= 0 ? serialGetBaudrate(port) : 0;
         }, "Baud:");
+    line = window->newLine(grid);
+    line->padAll(PAD_TINY);
+    new StaticText(line, rect_t{}, "GNSS data");
+#if PORTRAIT
+    line = window->newLine(grid2);
+    line->padAll(PAD_ZERO);
+    line->padLeft(PAD_LARGE);
+#endif
+    new DebugInfoNumber<uint8_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsGetProtocol(); }, "Proto:");
+    new DebugInfoNumber<uint32_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsData.ggaCount; }, "GGA:");
+    new DebugInfoNumber<uint32_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsData.gsvCount; }, "GSV:");
+    line = window->newLine(grid);
+    line->padAll(PAD_TINY);
+    new StaticText(line, rect_t{}, "GNSS RF");
+#if PORTRAIT
+    line = window->newLine(grid2);
+    line->padAll(PAD_ZERO);
+    line->padLeft(PAD_LARGE);
+#endif
+    new DebugInfoNumber<uint8_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsData.satsInView; }, "View:");
+    new DebugInfoNumber<uint8_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsData.maxCn0; }, "C/N0:");
   }
 #endif
 

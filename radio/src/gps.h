@@ -31,6 +31,10 @@ struct gpsdata_t
   uint8_t fix;
   uint8_t numSat;
   uint32_t packetCount;
+  uint32_t ggaCount;
+  uint32_t gsvCount;
+  uint8_t satsInView;
+  uint8_t maxCn0;
   uint32_t errorCount;
   int32_t altitude;               // altitude in 0.1m
   uint16_t speed;                 // speed in 0.1m/s
@@ -39,6 +43,7 @@ struct gpsdata_t
 };
 
 extern gpsdata_t gpsData;
+uint8_t gpsGetProtocol();
 
 #if defined(DEBUG)
 extern uint8_t gpsTraceEnabled;
