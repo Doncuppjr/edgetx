@@ -33,6 +33,16 @@ receiver accepted or applied it. Check `gps status` after allowing time for
 an ACK/NAK. Validate effective rate by comparing NAV-PVT counter changes over
 real time; verify signal changes by observing acquisition/satellites.
 
+### Rate-command test (Nov 24, 2026)
+
+A direct GPS bridge test sent volatile CFG-VALSET CFG-RATE-MEAS requests
+for 5 Hz and then restored 10 Hz. Both requests received UBX ACK-ACK for
+class/id `06/8A`, but the receiver's own NAV-PVT `iTOW` timestamps continued
+to advance by 100 ms throughout. Therefore **the requested 5 Hz rate did
+not take effect** in this hardware test. Do not treat an ACK as verification
+or assume these controls are operational on this module yet. An additional
+readback/compatibility investigation is needed.
+
 The receiver tested on Nov 24, 2026 identified as `ROM SPG 5.10` with a
 reported UBX protocol 34.10. Direct polling produced ACKs for NAV-SAT and
 CFG-VALGET but not the expected payload responses; therefore configuration
