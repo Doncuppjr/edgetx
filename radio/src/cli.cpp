@@ -352,7 +352,7 @@ int cliRead(const char ** argv)
   FIL file;
   uint32_t bytesRead = 0;
   int bufferSize;
-  if (toInt(argv, 2, &bufferSize) == 0 || bufferSize <= 0 || bufferSize > 65536 ) {
+  if (toInt(argv, 2, &bufferSize) == 0 || bufferSize <= 0 || bufferSize > 4096 ) {
     cliSerialPrint("%s: Invalid buffer size \"%s\"", argv[0], argv[2]);
     return 0;
   }
