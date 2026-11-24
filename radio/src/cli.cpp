@@ -32,6 +32,9 @@
 #include "hal/watchdog_driver.h"
 
 #include "edgetx.h"
+#if defined(INTERNAL_GPS)
+#include "gps_ubx.h"
+#endif
 #include "os/sleep.h"
 #include "os/time.h"
 #include "os/task.h"
@@ -1764,7 +1767,48 @@ int cliGps(const char ** argv)
                    (unsigned long)gpsData.ubxSatCount,
                    unsigned(gpsData.ubxSatsVisible), unsigned(gpsData.ubxMaxCn0),
                    unsigned(gpsData.ubxSatsUsed));
+    cliSerialPrint("UBX accuracy h=%lu mm v=%lu mm speed=%lu mm/s PDOP=%u (0.01) flags=0x%02x",
+                   (unsigned long)gpsData.ubxHAccMm,
+                   (unsigned long)gpsData.ubxVAccMm,
+                   (unsigned long)gpsData.ubxSAccMms,
+                   unsigned(gpsData.ubxPDop), unsigned(gpsData.ubxFixFlags));
+    cliSerialPrint("UBX ACK count=%lu last=%s for %02x/%02x",
+                   (unsigned long)gpsData.ubxAckCount,
+                   gpsData.ubxAckType ? "ACK" : "NAK",
+                   unsigned(gpsData.ubxAckClass), unsigned(gpsData.ubxAckId));
     cliSerialPrint("UBX version=%s", gpsData.ubxVersion[0] ? gpsData.ubxVersion : "not received");
+  }
+  else if (!strcmp(argv[1], "rate")) {
+    int hz = 0;
+    if (gpsGetProtocol() != GPS_PROTOCOL_UBX ||
+        !argv[2] || toInt(argv, 2, &hz) == 0 || hz < 1 || hz > 10 ||
+        !gpsUbxSetRate((uint8_t)hz)) {
+      cliSerialPrint("gps rate: use 1, 2, 5, or 10 Hz with UBX GPS");
+    } else {
+      cliSerialPrint("GPS rate request sent (%d Hz, volatile); check ACK and PVT frequency", hz);
+    }
+  }
+  else if (!strcmp(argv[1], "constellation")) {
+    const char * const name = argv[2] ? argv[2] : "";
+    const char * const state = argv[3] ? argv[3] : "";
+    uint32_t key = 0;
+    if (!strcmp(name, "gps")) key = 0x1031001f;
+    else if (!strcmp(name, "sbas")) key = 0x10310020;
+    else if (!strcmp(name, "galileo")) key = 0x10310021;
+    else if (!strcmp(name, "beidou")) key = 0x10310022;
+    else if (!strcmp(name, "qzss")) key = 0x10310024;
+    else if (!strcmp(name, "glonass")) key = 0x10310025;
+    bool enable = !strcmp(state, "on");
+    bool disable = !strcmp(state, "off");
+    if (gpsGetProtocol() != GPS_PROTOCOL_UBX || !key ||
+        (!enable && !disable) ||
+        // Prevent accidental loss of the primary GNSS reference.
+        (key == 0x1031001f && disable) ||
+        !gpsUbxSetConstellation(key, enable)) {
+      cliSerialPrint("gps constellation: <gps|sbas|galileo|beidou|qzss|glonass> <on|off> (GPS off blocked)");
+    } else {
+      cliSerialPrint("GPS constellation %s %s requested (volatile); check ACK and reacquisition", name, state);
+    }
   }
   else if (argv[1][0] == '$') {
     // send command to GPS
@@ -1956,7 +2000,7 @@ const CliCommand cliCommands[] = {
   { "jitter", cliShowJitter, "" },
 #endif
 #if defined(INTERNAL_GPS)
-  { "gps", cliGps, "status|bridge|$<command>|trace" },
+  { "gps", cliGps, "status|rate <1|2|5|10>|constellation <name> <on|off>|bridge|trace" },
 #endif
 #if defined(SPACEMOUSE)
   { "spacemouse", cliSpaceMouse, "poll | tare | startstreaming | stopstreaming | trace" },

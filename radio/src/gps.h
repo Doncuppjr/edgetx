@@ -38,6 +38,15 @@ struct gpsdata_t
   uint32_t ubxPvtCount;
   uint32_t ubxSatCount;
   uint8_t ubxFixType;
+  uint8_t ubxFixFlags;
+  uint32_t ubxHAccMm;   // NAV-PVT horizontal accuracy estimate in mm
+  uint32_t ubxVAccMm;   // NAV-PVT vertical accuracy estimate in mm
+  uint32_t ubxSAccMms;  // NAV-PVT speed accuracy estimate in mm/s
+  uint16_t ubxPDop;     // NAV-PVT PDOP in units of 0.01
+  uint32_t ubxAckCount;
+  uint8_t ubxAckType;   // 1 = ACK, 0 = NAK
+  uint8_t ubxAckClass;
+  uint8_t ubxAckId;
   uint8_t ubxSatsVisible;
   uint8_t ubxMaxCn0;
   uint8_t ubxSatsUsed;

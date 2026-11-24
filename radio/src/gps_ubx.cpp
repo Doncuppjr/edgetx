@@ -125,6 +125,52 @@ static void gpsSendMessage(uint16_t msg_type, uint16_t msg_len,
   gpsSerialDrv->sendByte(gpsSerialCtx, ck_b);
 }
 
+// M10 configuration keys use the UBX-CFG-VALSET key/value interface.
+// Layer 1 is volatile RAM: never silently modify BBR or flash.
+static bool gpsUbxSetU1(uint32_t key, uint8_t value)
+{
+  if (!gpsSerialDrv || !gpsSerialDrv->sendByte || !gpsSerialDrv->sendBuffer)
+    return false;
+  if (gpsSerialDrv->txCompleted && !gpsSerialDrv->txCompleted(gpsSerialCtx))
+    return false;
+  uint8_t payload[9] = {0, 1, 0, 0, uint8_t(key), uint8_t(key >> 8),
+                        uint8_t(key >> 16), uint8_t(key >> 24), value};
+  gpsSendMessage(0x068a, sizeof(payload), payload);
+  return true;
+}
+
+bool gpsUbxSetRate(uint8_t hz)
+{
+  if (hz != 1 && hz != 2 && hz != 5 && hz != 10) return false;
+  // CFG-RATE-MEAS (U2) = measurement interval, milliseconds.
+  if (!gpsSerialDrv || !gpsSerialDrv->sendByte || !gpsSerialDrv->sendBuffer)
+    return false;
+  if (gpsSerialDrv->txCompleted && !gpsSerialDrv->txCompleted(gpsSerialCtx))
+    return false;
+  uint16_t interval = 1000 / hz;
+  uint32_t key = 0x30210001;
+  uint8_t payload[10] = {0, 1, 0, 0, uint8_t(key), uint8_t(key >> 8),
+                         uint8_t(key >> 16), uint8_t(key >> 24),
+                         uint8_t(interval), uint8_t(interval >> 8)};
+  gpsSendMessage(0x068a, sizeof(payload), payload);
+  return true;
+}
+
+bool gpsUbxSetConstellation(uint32_t key, bool enabled)
+{
+  switch (key) {
+    case 0x1031001f:  // GPS
+    case 0x10310020:  // SBAS
+    case 0x10310021:  // Galileo
+    case 0x10310022:  // BeiDou
+    case 0x10310024:  // QZSS
+    case 0x10310025:  // GLONASS
+      return gpsUbxSetU1(key, enabled ? 1 : 0);
+    default:
+      return false;
+  }
+}
+
 // NAV-SAT is usually larger than the 100-byte navigation parser buffer.
 // Accumulate only the small diagnostics required while checksumming its stream.
 static uint8_t satCount = 0, satMaxCn0 = 0, satUsed = 0;
@@ -169,6 +215,11 @@ static void gpsProcessMessage(uint16_t msg_type, uint16_t msg_len,
     auto pvt = (ubxNavPvt_t*)payload;
     gpsData.ubxPvtCount++;
     gpsData.ubxFixType = pvt->fixType;
+    gpsData.ubxFixFlags = pvt->flags;
+    gpsData.ubxHAccMm = pvt->hAcc;
+    gpsData.ubxVAccMm = pvt->vAcc;
+    gpsData.ubxSAccMms = pvt->sAcc;
+    gpsData.ubxPDop = pvt->pDOP;
     gpsData.fix = pvt->flags & 0x01;
     gpsData.numSat = pvt->numSV;
     gpsData.speed = pvt->gSpeed / 100;            // speed in 0.1m/s
@@ -258,7 +309,8 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
         break;
       }
       if (!streamSat && !streamVersion &&
-          ((msg_type != 0x0107 && msg_type != 0x0104) || msg_len > BUFFER_SIZE)) {
+          ((msg_type != 0x0107 && msg_type != 0x0104 &&
+            msg_type != 0x0500 && msg_type != 0x0501) || msg_len > BUFFER_SIZE)) {
         state = 9;
         break;
       }
@@ -310,6 +362,11 @@ bool gpsNewFrameUBX(uint8_t c, bool detect)
           for (int i = 0; i < monVerLen && i < 30; i++)
             gpsData.ubxVersion[i] = monVer[i];
           gpsData.ubxVersion[monVerLen < 30 ? monVerLen : 30] = 0;
+        } else if ((msg_type == 0x0500 || msg_type == 0x0501) && msg_len == 2) {
+          gpsData.ubxAckType = msg_type == 0x0501 ? 1 : 0;
+          gpsData.ubxAckClass = buf[0];
+          gpsData.ubxAckId = buf[1];
+          gpsData.ubxAckCount++;
         } else {
           gpsProcessMessage(msg_type, msg_len, buf);
         }

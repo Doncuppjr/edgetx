@@ -18,3 +18,8 @@
 #include <inttypes.h>
 
 bool gpsNewFrameUBX(uint8_t c, bool detect);
+
+// Optional u-blox configuration. Changes affect receiver RAM only.
+// Return false if the UBX protocol/serial driver is not active.
+bool gpsUbxSetRate(uint8_t hz);
+bool gpsUbxSetConstellation(uint32_t key, bool enabled);
