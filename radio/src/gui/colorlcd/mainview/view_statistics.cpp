@@ -354,6 +354,23 @@ void DebugViewPage::build(Window* window)
     new DebugInfoNumber<uint16_t>(
         line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
         [] { return gpsData.hdop; }, STR_GPS_HDOP);
+
+    // GPS fix / satellite / HDOP alone cannot distinguish no serial data
+    // from a receiver with no satellite lock. Show parser activity here.
+    line = window->newLine(grid);
+    line->padAll(PAD_TINY);
+    new StaticText(line, rect_t{}, "GPS UART");
+#if PORTRAIT
+    line = window->newLine(grid2);
+    line->padAll(PAD_ZERO);
+    line->padLeft(PAD_LARGE);
+#endif
+    new DebugInfoNumber<uint32_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsData.packetCount; }, "Pkt:");
+    new DebugInfoNumber<uint32_t>(
+        line, rect_t{0, 0, DBG_B_WIDTH, DBG_B_HEIGHT},
+        [] { return gpsData.errorCount; }, "Err:");
   }
 #endif
 
