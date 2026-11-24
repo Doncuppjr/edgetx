@@ -291,6 +291,9 @@ void Bluetooth::sendTrainer()
 
 void Bluetooth::forwardTelemetry(const uint8_t * packet)
 {
+  // Do not interleave live Telemetry with AT negotiation or module updating.
+  if (otaRequested || state == BLUETOOTH_STATE_OTA_WAIT_ACK ||
+      state == BLUETOOTH_STATE_OTA_ACTIVE) return;
   crc = 0x00;
 
   buffer[bufferIndex++] = START_STOP; // start byte
@@ -398,11 +401,29 @@ void Bluetooth::wakeup(void)
 }
 #else // PCBX9E
 // Startup-only limits. Four attempts per initialization, then remain
-// quiescent until an explicit user mode transition or bounded recovery. All timing is in 10ms
-// ticks; no blocking sleep, busy-loop or continuous background polling.
-static constexpr tmr10ms_t BT_INIT_RESET_HOLD = 15;   // 150 ms
-static constexpr tmr10ms_t BT_INIT_STAGE_TIMEOUT = 400; // 4 sec
+// quiescent until an explicit user mode transition or bounded recovery.
+// All timings in 10ms ticks, no blocking sleep/poll.
+static constexpr tmr10ms_t BT_INIT_RESET_HOLD = 15; // 150ms
+static constexpr tmr10ms_t BT_INIT_STAGE_TIMEOUT = 400; // 4 seconds
 static constexpr uint8_t BT_INIT_MAX_ATTEMPTS = 4;
+
+void Bluetooth::requestOta()
+{
+  if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) return;
+  // Generic AT+OTA extension; complete normal AT setup first, before
+  // the module enters a binary streaming Trainer or Telemetry role.
+  otaRequested = true;
+  initAttemptCount = 0;
+  initExhausted = false;
+  initEverCompleted = false;
+  postInitRecoveryUsed = false;
+  initUserOffSeen = false;
+  initObservedState = 0xff;
+  bluetoothDisable();
+  initResetHold = true;
+  state = BLUETOOTH_STATE_OFF;
+  wakeupTime = get_tmr10ms() + BT_INIT_RESET_HOLD;
+}
 
 void Bluetooth::wakeup()
 {
@@ -479,6 +500,36 @@ void Bluetooth::wakeup()
   if (state == BLUETOOTH_STATE_FLASH_FIRMWARE) {
     return;
   }
+  // After acknowledgement leave the module powered for Wi-Fi OTA.
+  // Switching Bluetooth Off explicitly exits the special radio state.
+  if (state == BLUETOOTH_STATE_OTA_ACTIVE) {
+    if (g_eeGeneral.bluetoothMode != BLUETOOTH_OFF) return;
+    otaRequested = false;
+    bluetoothDisable();
+    state = BLUETOOTH_STATE_OFF;
+    return;
+  }
+  if (state == BLUETOOTH_STATE_OTA_WAIT_ACK) {
+    if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) {
+      otaRequested = false;
+      bluetoothDisable();
+      state = BLUETOOTH_STATE_OFF;
+      return;
+    }
+    char * line = readline(false);
+    if (line && !strcmp(line, "OK+OTA")) {
+      otaRequested = false;
+      state = BLUETOOTH_STATE_OTA_ACTIVE;
+    } else if ((line && !strcmp(line, "ERROR")) ||
+               (tmr10ms_t)(now - otaRequestTime) >= 300) {
+      // Unsupported module or no response: fall back to ordinary startup.
+      otaRequested = false;
+      bluetoothDisable();
+      state = BLUETOOTH_STATE_OFF;
+      wakeupTime = now + 15;
+    }
+    return;
+  }
 
   // Only the initial AT configuration is subject to this watchdog.
   // Discovery, pairing, and a connected trainer are never retried here.
@@ -516,7 +567,7 @@ void Bluetooth::wakeup()
 
   if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF ||
       (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
-       !IS_BLUETOOTH_TRAINER())) {
+       !IS_BLUETOOTH_TRAINER() && !otaRequested)) {
 
     if (state != BLUETOOTH_STATE_OFF) {
       bluetoothDisable();
@@ -598,12 +649,18 @@ void Bluetooth::wakeup()
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
-      if (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
-          g_model.trainerData.mode == TRAINER_MODE_MASTER_BLUETOOTH)
-        writeString("AT+ROLE1");
-      else
-        writeString("AT+ROLE0");
-      state = BLUETOOTH_STATE_ROLE_SENT;
+      if (otaRequested) {
+        writeString("AT+OTA");
+        otaRequestTime = now;
+        state = BLUETOOTH_STATE_OTA_WAIT_ACK;
+      } else {
+        if (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
+            g_model.trainerData.mode == TRAINER_MODE_MASTER_BLUETOOTH)
+          writeString("AT+ROLE1");
+        else
+          writeString("AT+ROLE0");
+        state = BLUETOOTH_STATE_ROLE_SENT;
+      }
     } else if (state == BLUETOOTH_STATE_ROLE_SENT &&
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||

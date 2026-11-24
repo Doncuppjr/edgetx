@@ -48,7 +48,9 @@ enum BluetoothStates {
   BLUETOOTH_STATE_CONNECTED,
   BLUETOOTH_STATE_DISCONNECTED,
   BLUETOOTH_STATE_CLEAR_REQUESTED,
-  BLUETOOTH_STATE_FLASH_FIRMWARE
+  BLUETOOTH_STATE_FLASH_FIRMWARE,
+  BLUETOOTH_STATE_OTA_WAIT_ACK,
+  BLUETOOTH_STATE_OTA_ACTIVE
 };
 
 #define LEN_BLUETOOTH_ADDR              16
@@ -86,6 +88,9 @@ class Bluetooth
 
     void forwardTelemetry(const uint8_t * packet);
     void wakeup();
+    void requestOta();
+    bool otaRequested = false;
+    uint32_t otaRequestTime = 0;
     const char * flashFirmware(const char * filename, ProgressHandler progressHandler);
 
     volatile uint8_t state;
