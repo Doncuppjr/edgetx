@@ -606,10 +606,9 @@ void Bluetooth::wakeup()
     wakeupTime = now + 10; /* 100ms */
   }
   else if (state == BLUETOOTH_STATE_CONNECTED) {
-    if (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER && g_model.trainerData.mode == TRAINER_MODE_MASTER_BLUETOOTH) {
-      receiveTrainer();
-    }
-    else {
+    // Master Trainer RX is already serviced by the fast mixer path above.
+    if (g_eeGeneral.bluetoothMode != BLUETOOTH_TRAINER ||
+        g_model.trainerData.mode != TRAINER_MODE_MASTER_BLUETOOTH) {
       if (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER && g_model.trainerData.mode == TRAINER_MODE_SLAVE_BLUETOOTH) {
         sendTrainer();
         wakeupTime = now + 2; /* 20ms */
