@@ -1758,8 +1758,15 @@ int cliGps(const char ** argv)
                    (unsigned long)(port >= 0 ? serialGetBaudrate(port) : 0),
                    (unsigned long)gpsData.packetCount,
                    (unsigned long)gpsData.errorCount);
+    bool navFresh = gpsGetProtocol() == GPS_PROTOCOL_UBX ?
+      (gpsData.lastUbxPvtTick != 0 &&
+       uint32_t(get_tmr10ms() - gpsData.lastUbxPvtTick) <= 200) :
+      (gpsGetProtocol() == GPS_PROTOCOL_NMEA &&
+       gpsData.lastGgaTick != 0 &&
+       uint32_t(get_tmr10ms() - gpsData.lastGgaTick) <= 200);
     cliSerialPrint("GPS fix=%s HDOP=%s NMEA_GGA=%lu NMEA_GSV=%lu",
-                   gpsNavigationFresh() ? "valid" : "unavailable/stale",
+                   !navFresh ? "N/A (stale/missing)" :
+                     (gpsData.fix ? "valid" : "no fix"),
                    gpsHdopFresh() ? "available" : "N/A",
                    (unsigned long)gpsData.ggaCount,
                    (unsigned long)gpsData.gsvCount);
