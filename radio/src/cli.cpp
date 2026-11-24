@@ -1694,9 +1694,60 @@ int cliShowJitter(const char ** argv)
 #endif
 
 #if defined(INTERNAL_GPS)
+#if defined(ENABLE_SERIAL_PASSTHROUGH)
+// Temporary raw AUX GPS <-> USB CDC bridge. Disconnection restores EdgeTX.
+// Keep the UART configured as GPS so that power and baudrate are preserved.
+static const etx_serial_driver_t* gpsBridgeDrv = nullptr;
+static void* gpsBridgeCtx = nullptr;
+static void gpsBridgeRx(uint8_t* bytes, uint32_t count)
+{
+  if (!gpsBridgeDrv || !gpsBridgeDrv->sendByte) return;
+  while (count--) gpsBridgeDrv->sendByte(gpsBridgeCtx, *bytes++);
+}
+
+static void cliGpsBridge()
+{
+  int port = serialGetModePort(UART_MODE_GPS);
+  void* ctx = nullptr;
+  const etx_serial_driver_t* drv = nullptr;
+  if (port < 0 || !serialGetPortCtx(port, &ctx, &drv) ||
+      !drv || !drv->getByte || !drv->sendByte) {
+    cliSerialPrint("GPS bridge: GPS UART not available");
+    return;
+  }
+  cliSerialPrint("GPS bridge: raw UBX on USB; unplug USB to exit");
+  gpsSetSerialDriver(nullptr, nullptr, GPS_PROTOCOL_AUTO);
+  gpsBridgeCtx = ctx;
+  gpsBridgeDrv = drv;
+  auto previousRx = cliReceiveCallBack;
+  cliReceiveCallBack = gpsBridgeRx;
+  // Do not suspend the mixer or RTOS; ordinary radio operation continues.
+  // The main GPS parser is paused so that the bridge owns the receive FIFO.
+  while (usbPlugged()) {
+    uint8_t byte;
+    if (drv->getByte(ctx, &byte) > 0) {
+      cliSerialPutc(byte);
+    } else {
+      delay_ms(1);
+    }
+    WDG_RESET();
+  }
+  cliReceiveCallBack = previousRx;
+  gpsBridgeDrv = nullptr;
+  gpsBridgeCtx = nullptr;
+  gpsSetSerialDriver(ctx, drv, GPS_PROTOCOL_AUTO);
+}
+#endif
+
 int cliGps(const char ** argv)
 {
 
+#if defined(ENABLE_SERIAL_PASSTHROUGH)
+  if (strcmp(argv[1], "bridge") == 0) {
+    cliGpsBridge();
+  }
+  else
+#endif
   if (strcmp(argv[1], "status") == 0) {
     int port = serialGetModePort(UART_MODE_GPS);
     cliSerialPrint("GPS protocol=%u baud=%lu packets=%lu errors=%lu",
@@ -1905,7 +1956,7 @@ const CliCommand cliCommands[] = {
   { "jitter", cliShowJitter, "" },
 #endif
 #if defined(INTERNAL_GPS)
-  { "gps", cliGps, "status|$<command>|trace" },
+  { "gps", cliGps, "status|bridge|$<command>|trace" },
 #endif
 #if defined(SPACEMOUSE)
   { "spacemouse", cliSpaceMouse, "poll | tare | startstreaming | stopstreaming | trace" },
