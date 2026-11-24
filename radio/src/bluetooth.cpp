@@ -283,6 +283,9 @@ void Bluetooth::sendTrainer()
 
 void Bluetooth::forwardTelemetry(const uint8_t * packet)
 {
+  // Do not interleave live Telemetry with AT negotiation or module updating.
+  if (otaRequested || state == BLUETOOTH_STATE_OTA_WAIT_ACK ||
+      state == BLUETOOTH_STATE_OTA_ACTIVE) return;
   crc = 0x00;
 
   buffer[bufferIndex++] = START_STOP; // start byte
@@ -389,6 +392,17 @@ void Bluetooth::wakeup(void)
 #endif
 }
 #else // PCBX9E
+void Bluetooth::requestOta()
+{
+  if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) return;
+  // Re-run the normal AT startup handshake, then issue optional AT+OTA
+  // before entering any data-streaming role (including Telemetry).
+  otaRequested = true;
+  bluetoothDisable();
+  state = BLUETOOTH_STATE_OFF;
+  wakeupTime = get_tmr10ms() + 15; // 150 ms disable interval
+}
+
 void Bluetooth::wakeup()
 {
   if (state != BLUETOOTH_STATE_OFF) {
@@ -407,6 +421,36 @@ void Bluetooth::wakeup()
   if (state == BLUETOOTH_STATE_FLASH_FIRMWARE) {
     return;
   }
+  // After acknowledgement leave the module powered for Wi-Fi OTA.
+  // Switching Bluetooth Off explicitly exits the special radio state.
+  if (state == BLUETOOTH_STATE_OTA_ACTIVE) {
+    if (g_eeGeneral.bluetoothMode != BLUETOOTH_OFF) return;
+    otaRequested = false;
+    bluetoothDisable();
+    state = BLUETOOTH_STATE_OFF;
+    return;
+  }
+  if (state == BLUETOOTH_STATE_OTA_WAIT_ACK) {
+    if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) {
+      otaRequested = false;
+      bluetoothDisable();
+      state = BLUETOOTH_STATE_OFF;
+      return;
+    }
+    char * line = readline(false);
+    if (line && !strcmp(line, "OK+OTA")) {
+      otaRequested = false;
+      state = BLUETOOTH_STATE_OTA_ACTIVE;
+    } else if ((line && !strcmp(line, "ERROR")) ||
+               (tmr10ms_t)(now - otaRequestTime) >= 300) {
+      // Unsupported module or no response: fall back to ordinary startup.
+      otaRequested = false;
+      bluetoothDisable();
+      state = BLUETOOTH_STATE_OFF;
+      wakeupTime = now + 15;
+    }
+    return;
+  }
 
 #if defined(BT_PWR_GPIO)
   if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) {
@@ -419,7 +463,7 @@ void Bluetooth::wakeup()
 
   if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF ||
       (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
-       !IS_BLUETOOTH_TRAINER())) {
+       !IS_BLUETOOTH_TRAINER() && !otaRequested)) {
 
     if (state != BLUETOOTH_STATE_OFF) {
       bluetoothDisable();
@@ -481,12 +525,18 @@ void Bluetooth::wakeup()
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
-      if (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
-          g_model.trainerData.mode == TRAINER_MODE_MASTER_BLUETOOTH)
-        writeString("AT+ROLE1");
-      else
-        writeString("AT+ROLE0");
-      state = BLUETOOTH_STATE_ROLE_SENT;
+      if (otaRequested) {
+        writeString("AT+OTA");
+        otaRequestTime = now;
+        state = BLUETOOTH_STATE_OTA_WAIT_ACK;
+      } else {
+        if (g_eeGeneral.bluetoothMode == BLUETOOTH_TRAINER &&
+            g_model.trainerData.mode == TRAINER_MODE_MASTER_BLUETOOTH)
+          writeString("AT+ROLE1");
+        else
+          writeString("AT+ROLE0");
+        state = BLUETOOTH_STATE_ROLE_SENT;
+      }
     } else if (state == BLUETOOTH_STATE_ROLE_SENT &&
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||

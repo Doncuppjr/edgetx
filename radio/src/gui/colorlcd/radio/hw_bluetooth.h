@@ -30,5 +30,6 @@ class BluetoothConfigWindow
 
  protected:
   Window* settingsBtn = nullptr;
+  Window* otaBtn = nullptr;
   Window* nameEdit = nullptr;
 };

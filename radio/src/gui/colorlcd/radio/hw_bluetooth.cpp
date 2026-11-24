@@ -82,6 +82,7 @@ BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& gri
       GET_DEFAULT(g_eeGeneral.bluetoothMode), [=](int value) {
         g_eeGeneral.bluetoothMode = value;
         settingsBtn->show(g_eeGeneral.bluetoothMode != BLUETOOTH_OFF);
+        otaBtn->show(g_eeGeneral.bluetoothMode != BLUETOOTH_OFF);
         nameEdit->show(g_eeGeneral.bluetoothMode != BLUETOOTH_OFF);
       });
 
@@ -91,6 +92,21 @@ BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& gri
         return 0;
       });
   settingsBtn->show(g_eeGeneral.bluetoothMode != BLUETOOTH_OFF);
+
+  // Optional protocol extension: the module may support AT+OTA.
+  // Confirmation is required because Trainer/Telemetry will stop.
+  otaBtn = new TextButton(box, rect_t{}, "Update module",
+      [=]() -> uint8_t {
+        new ConfirmDialog("Bluetooth update",
+            "Stop Bluetooth and request module firmware update?",
+            [=]() {
+              bluetooth.requestOta();
+              new MessageDialog("Bluetooth update",
+                  "Request sent. Follow your module's update instructions.");
+            });
+        return 0;
+      });
+  otaBtn->show(g_eeGeneral.bluetoothMode != BLUETOOTH_OFF);
 
   // BT radio name
   nameEdit = parent->newLine(grid);
