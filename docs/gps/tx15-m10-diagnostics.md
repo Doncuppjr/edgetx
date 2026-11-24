@@ -91,3 +91,47 @@ Two seconds is a conservative diagnostic freshness window, not a universal
 GPS timeout; if supporting low update rates later, widen it appropriately.
 NMEA GSV aggregation remains a basic diagnostic, not a complete list of unique
 satellites across constellations.
+
+## Receiver configuration verification, 2026-11-24
+
+Goal: distinguish documented command support and ACKs from a setting that
+actually took effect. The TX15 GPS was bridged to host USB CDC; tests sent
+valid UBX checksummed frames and independently decoded returned UBX frames.
+Only RAM-layer changes were requested. No baud changes, persistent writes,
+constellation disable, or cold-start reset were performed.
+
+- **Receiver identity VERIFIED** via `UBX-MON-VER` response: ROM SPG 5.10
+  (7b202e), PROTVER=34.10, capability strings `GPS;GLO;GAL;BDS` and
+  `SBAS;QZSS`.
+- **UBX-NAV-PVT stream VERIFIED** at 10 Hz from GPS iTOW timestamps, each
+  successive fix +100 ms. This is an observed *existing state*, not a
+  configuration-change success.
+- **CFG-VALGET RAM readback NOT WORKING**: polls for CFG-RATE-MEAS
+  (0x30210001), CFG-MSGOUT-UBX_NAV_PVT_UART1 (0x20910007),
+  CFG-MSGOUT-UBX_NAV_SAT_UART1 (0x20910016), and GPS constellation signal
+  (0x1031001f) each received UBX-ACK-ACK for `06/8B` **without** any
+  `06/8B` key/value response. That is unexpected for these readbacks.
+- **CFG-VALSET RATE NOT CONFIRMED**: setting 5 Hz returned ACK for `06/8A`,
+  but GPS iTOW still increased by 100 ms for every NAV-PVT message. A
+  separate 10 Hz request ACKed and retained baseline 100 ms intervals.
+- **CFG-VALSET NAV-SAT output NOT CONFIRMED**: setting UART1 NAV-SAT output
+  rate to 1 returned `06/8A` ACK, but yielded no `01/35` messages for a
+  three-second observation. A RAM-layer setting of 0 was sent afterward,
+  and again ACKed. The receiver had not provided NAV-SAT in the baseline.
+- **Legacy CFG-MSG (06/01) output rate NOT CONFIRMED**: a read-only
+  poll for NAV-PVT output rate returned ACK-ACK, not the expected CFG-MSG
+  payload. Setting output rate to 2 returned ACK, but GPS iTOW still
+  increased by 100 ms for each NAV-PVT message. Setting 1 was then sent
+  to restore the expected baseline, and also ACKed.
+- **GNSS network/constellation settings UNTESTED**: do not infer support
+  from an ACK; changing these can interrupt satellite acquisition. UART
+  receiver baud, wakeup assistance, and cold-start reset also untested.
+
+**Conclusion: no receiver *configuration change* has yet met the acceptance
+criteria of verified before/after behavior, or a matching readback with
+observed effective behavior. Treat the current experimental `gps rate` and
+`gps constellation` CLI commands as unverified/transmission-only, not
+successfully applied settings.**
+
+The raw GPS bridge remains active after the test and requires a USB
+physical disconnect/reconnect to restore EdgeTX's parser.
