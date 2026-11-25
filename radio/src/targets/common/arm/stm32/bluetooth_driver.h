@@ -59,6 +59,7 @@ struct BluetoothUsbStats {
 bool bluetoothUsbStart();
 void bluetoothUsbStop();
 bool bluetoothUsbOpen();
+bool bluetoothUsbSessionStarted();
 bool bluetoothUsbRomRequested();
 bool bluetoothUsbFinishRequested();
 bool bluetoothUsbRecovery();

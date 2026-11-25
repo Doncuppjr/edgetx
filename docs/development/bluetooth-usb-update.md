@@ -7,7 +7,7 @@ modules, and their ordinary initialization and FIFOs are unchanged.
 
 Select Bluetooth settings > Update module > USB. EdgeTX reinitializes the
 module, confirms AT+UPDATE=UART / OK+UPDATE:UART, and selects USB CDC.
-The browser must see OK+BRIDGE:1,115200,READY before requesting
+After binary serial setup, the browser sends AT+BRIDGE? and must see OK+BRIDGE:1,115200,READY before requesting
 AT+DOWNLOAD. USB presence, CDC initialization, and host DTR are distinct.
 RTS is not wired to the ESP reset: after verified flash and software restart,
 the browser raises RTS to request return to normal Bluetooth. The radio does
@@ -87,3 +87,20 @@ The resulting automatic-cancel UI needed an explicit canceled message.
 ROM entry, flash readback, restart, recovery, and throughput measurements
 remain pending at this point. C3 hardware and legacy CC2540 hardware have
 not been tested by this bench session.
+
+
+The first ROM-entry bench attempt received OK+DOWNLOAD followed by the C5
+ROM log with boot:0x8 (DOWNLOAD(UART0/USB)) and waiting for download.
+Synchronization did not receive a reply. Recovery reconnect returned the
+RECOVERY banner, but raw synchronization still did not receive a reply;
+no flash erase/write has been performed. Investigation is ongoing.
+
+A USB trace also exposed a Linux CDC open race: the kernel asserted
+DTR/RTS before pyserial applied raw termios, and echoed an unsolicited
+READY banner back as host OUT data. The bridge now remains silent until
+AT+BRIDGE? arrives from the configured host. Unknown/echoed pre-ROM lines
+cannot request download or force recovery. DTR-close cancellation starts
+only after this handshake, so initial driver control-line changes cannot
+cancel an otherwise valid armed session. On a recovery connection,
+AT+BRIDGE=STATUS? retrieves counters before AT+BRIDGE? starts binary
+forwarding. CLI is still not needed by the normal installer.

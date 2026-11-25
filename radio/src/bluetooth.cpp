@@ -509,7 +509,7 @@ void Bluetooth::wakeup()
       return;
     }
     bool open = bluetoothUsbOpen();
-    if (open) usbHostSeen = true;
+    if (open && bluetoothUsbSessionStarted()) usbHostSeen = true;
     if (bluetoothUsbRecovery() ||
         (bluetoothUsbRomRequested() &&
          (tmr10ms_t)(now - otaRequestTime) >= 30000)) {

@@ -2,7 +2,27 @@
 #include <assert.h>
 #include <stdint.h>
 #include <vector>
+#include "../../radio/src/hal/bluetooth_usb_handshake.h"
 int main() {
+  BluetoothUsbHandshake handshake;
+  auto feed=[&](const char* line) {
+    BluetoothUsbHandshake::Event event=BluetoothUsbHandshake::NONE;
+    while (*line) event=handshake.feed(*line++);
+    return event;
+  };
+  assert(feed("AT+DOWNLOAD\r\n")==BluetoothUsbHandshake::NONE);
+  assert(feed("OK+BRIDGE:1,115200,READY\r\n")==BluetoothUsbHandshake::NONE);
+  assert(!handshake.ready());
+  assert(feed("AT+BRIDGE=STATUS?\r\n")==BluetoothUsbHandshake::STATUS);
+  assert(!handshake.ready());
+  assert(feed("AT+BRIDGE?\r\n")==BluetoothUsbHandshake::PROBE);
+  assert(handshake.ready());
+  assert(feed("AT+DOWNLOAD\r\n")==BluetoothUsbHandshake::DOWNLOAD);
+  handshake.reset();
+  assert(!handshake.ready());
+  assert(feed("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxAT+BRIDGE?\n")==BluetoothUsbHandshake::NONE);
+  assert(feed("AT+DOWNLOAD\n")==BluetoothUsbHandshake::NONE);
+  assert(feed("AT+BRIDGE?\n")==BluetoothUsbHandshake::PROBE);
   UsbMaintenancePacket p; uint8_t byte;
   assert(!p.peek(&byte)); assert(!p.pop());
   std::vector<uint8_t> expected, actual;

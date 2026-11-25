@@ -128,6 +128,8 @@ uint8_t bluetoothIsWriting(void)
 #if defined(USB_SERIAL)
 #include "hal/usb_driver.h"
 #include <string.h>
+#include <stdio.h>
+#include "hal/bluetooth_usb_handshake.h"
 
 // Separate buffers exist only for maintenance; normal Trainer/Telemetry
 // retains its 64-byte TX / 256-byte RX configuration.
@@ -136,8 +138,7 @@ static BluetoothUsbStats btUsbCounters = {};
 static volatile bool btUsbRom = false, btUsbRecover = false, btUsbFinish = false;
 static bool btUsbWasOpen = false, btUsbRtsLow = false;
 static uint32_t btUsbLastCycle = 0, btUsbOverrunBase = 0, btUsbErrorBase = 0;
-static char btUsbCommand[16];
-static uint8_t btUsbCommandLength = 0;
+static BluetoothUsbHandshake btUsbHandshake;
 
 static uint32_t btCyclesUs(uint32_t cycles) {
   return cycles / (SystemCoreClock / 1000000);
@@ -151,14 +152,11 @@ static void bluetoothUsbPoll()
   bool open = usbSerialMaintenanceOpen();
   if (open != btUsbWasOpen) {
     usbSerialMaintenanceDiscard();
-    btUsbCommandLength = 0; btUsbRtsLow = false; btUsbLastCycle = 0;
+    btUsbHandshake.reset(); btUsbRtsLow = false; btUsbLastCycle = 0;
     if (open) {
       STM32SerialDriver.clearRxBuffer(_bt_usart_ctx);
       btUsbOverrunBase = stm32SerialRxOverruns(_bt_usart_ctx);
       btUsbErrorBase = stm32SerialRxErrors(_bt_usart_ctx);
-      const char* banner = btUsbRom ? "OK+BRIDGE:1,115200,RECOVERY\r\n" :
-                                     "OK+BRIDGE:1,115200,READY\r\n";
-      for (const char* c = banner; *c; ++c) usbSerialMaintenanceWrite(*c);
       // New host connection explicitly retries a retained ROM session.
       btUsbRecover = false;
     } else if (btUsbRom) btUsbRecover = true;
@@ -168,7 +166,7 @@ static void bluetoothUsbPoll()
   if (!usbSerialMaintenanceRts()) btUsbRtsLow = true;
   // This is a host completion request, not a declaration of update success.
   // The radio still requires a successful normal module handshake.
-  if (btUsbRom && btUsbRtsLow && usbSerialMaintenanceRts()) {
+  if (btUsbRom && btUsbHandshake.ready() && btUsbRtsLow && usbSerialMaintenanceRts()) {
     btUsbFinish = true; return;
   }
   if (btUsbRecover) return;
@@ -192,14 +190,23 @@ static void bluetoothUsbPoll()
   uint8_t byte;
   for (unsigned budget = 0; budget < 64; ++budget) {
     if (!usbSerialMaintenancePeek(&byte)) break;
-    if (!btUsbRom) {
+    if (!btUsbHandshake.ready() || !btUsbRom) {
       usbSerialMaintenanceConsume();
-      if (byte == '\n') {
-        if (btUsbCommandLength && btUsbCommand[btUsbCommandLength-1] == '\r')
-          --btUsbCommandLength;
-        btUsbCommand[btUsbCommandLength] = 0;
-        if (strcmp(btUsbCommand, "AT+DOWNLOAD")) { btUsbRecover = true; break; }
-        // All 13 bytes fit in the initially empty 64-byte maintenance FIFO.
+      auto event = btUsbHandshake.feed(byte);
+      if (event == BluetoothUsbHandshake::PROBE) {
+        const char* banner = btUsbRom ? "OK+BRIDGE:1,115200,RECOVERY\r\n" :
+                                       "OK+BRIDGE:1,115200,READY\r\n";
+        for (const char* c=banner; *c; ++c) usbSerialMaintenanceWrite(*c);
+      } else if (event == BluetoothUsbHandshake::STATUS) {
+        char status[240];
+        snprintf(status,sizeof(status),
+          "OK+BRIDGE:STATUS,tx=%lu,rx=%lu,overrun=%lu,error=%lu,rxHwm=%lu,txHwm=%lu,gapUs=%lu,rom=%u\r\n",
+          (unsigned long)btUsbCounters.toModule,(unsigned long)btUsbCounters.toHost,
+          (unsigned long)btUsbCounters.overruns,(unsigned long)btUsbCounters.uartErrors,
+          (unsigned long)btUsbCounters.rxHighWater,(unsigned long)btUsbCounters.txHighWater,
+          (unsigned long)btUsbCounters.serviceGapMaxUs,(unsigned)btUsbRom);
+        for (const char* c=status; *c; ++c) usbSerialMaintenanceWrite(*c);
+      } else if (event == BluetoothUsbHandshake::DOWNLOAD && !btUsbRom) {
         const char* command = "AT+DOWNLOAD\r\n";
         while (*command) {
           if (!stm32SerialTrySendByte(_bt_usart_ctx, *command++)) {
@@ -208,9 +215,7 @@ static void bluetoothUsbPoll()
           ++btUsbCounters.toModule;
         }
         btUsbRom = true;
-      } else if (btUsbCommandLength < sizeof(btUsbCommand)-1)
-        btUsbCommand[btUsbCommandLength++] = byte;
-      else { btUsbRecover = true; break; }
+      }
     } else {
       if (!stm32SerialTrySendByte(_bt_usart_ctx, byte)) break;
       usbSerialMaintenanceConsume();
@@ -218,6 +223,7 @@ static void bluetoothUsbPoll()
     }
   }
   btMax(btUsbCounters.txHighWater, stm32SerialTxPending(_bt_usart_ctx));
+  if (!btUsbHandshake.ready()) return;
   for (unsigned budget = 0; budget < 256 && usbSerialFreeSpace(); ++budget) {
     if (!STM32SerialDriver.getByte(_bt_usart_ctx, &byte)) break;
     if (!usbSerialMaintenanceWrite(byte)) { btUsbRecover = true; break; }
@@ -233,7 +239,7 @@ bool bluetoothUsbStart()
   _bt_usart_ctx = STM32SerialDriver.init(REF_STM32_SERIAL_PORT(BTMaintenance), &cfg);
   btUsbCounters = {};
   btUsbRom = btUsbRecover = btUsbFinish = btUsbWasOpen = btUsbRtsLow = false;
-  btUsbLastCycle = btUsbCommandLength = 0;
+  btUsbLastCycle = 0; btUsbHandshake.reset();
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
   btMaintenance = _bt_usart_ctx != nullptr;
@@ -250,6 +256,7 @@ void bluetoothUsbStop()
   if (!prim) __enable_irq();
 }
 bool bluetoothUsbOpen() { return usbSerialMaintenanceOpen(); }
+bool bluetoothUsbSessionStarted() { return btUsbHandshake.ready(); }
 bool bluetoothUsbRomRequested() { return btUsbRom; }
 bool bluetoothUsbFinishRequested() { return btUsbFinish; }
 bool bluetoothUsbRecovery() { return btUsbRecover; }
