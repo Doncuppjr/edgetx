@@ -19,6 +19,8 @@
  * GNU General Public License for more details.
  */
 
+#include "hal/usb_maintenance_packet.h"
+
 extern "C" {
 
 /* Includes ------------------------------------------------------------------*/
@@ -114,6 +116,12 @@ static void (*baudRateCb)(uint32_t) = nullptr;
 // static void* baudRateCbCtx;
 
 bool cdcConnected = false;
+static volatile bool cdcDtr = false, cdcRts = false;
+static void (*maintenancePoll)() = nullptr;
+static UsbMaintenancePacket maintenancePacket;
+static uint32_t maintenanceRxStarted = 0;
+static volatile uint32_t maintenanceTxFlight = 0;
+
 
 /* Private functions ---------------------------------------------------------*/
 /**
@@ -122,6 +130,8 @@ bool cdcConnected = false;
   */
 static int8_t VCP_Init_FS(void)
 {
+  cdcDtr = cdcRts = false;
+  maintenancePacket.clear(); maintenanceTxFlight = 0;
   cdcConnected = true;
   USBD_CDC_SetTxBuffer(&hUsbDevice, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDevice, UserRxBufferFS);
@@ -135,7 +145,8 @@ static int8_t VCP_Init_FS(void)
 static int8_t VCP_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
-  cdcConnected = false;
+  cdcConnected = cdcDtr = cdcRts = false;
+  maintenancePacket.clear(); maintenanceTxFlight = 0;
   receiveDataCb = nullptr;
   baudRateCb = nullptr;
   APP_Tx_ptr_in = 0;
@@ -208,12 +219,13 @@ static int8_t VCP_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
     break;
 
   case CDC_SET_CONTROL_LINE_STATE:
-    // If a callback is provided, tell the upper driver of changes in DTR/RTS state
-    // if (plc && (Len == sizeof (uint16_t))) {
-    //   if (ctrlLineStateCb) {
-    //     ctrlLineStateCb(*((uint16_t *)Buf));
-    //   }
-    // }
+    // For zero-length class requests the CDC core supplies the setup packet,
+    // not LINE_CODING. Initialization is distinct from an opened host port.
+    if (pbuf && length == 0) {
+      auto req = (USBD_SetupReqTypedef*)pbuf;
+      cdcDtr = (req->wValue & 1) != 0;
+      cdcRts = (req->wValue & 2) != 0;
+    }
     break;
 
   case CDC_SEND_BREAK:
@@ -243,6 +255,10 @@ static int8_t VCP_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t VCP_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 {
   uint8_t result = USBD_OK;
+  if (maintenancePoll && maintenanceTxFlight) {
+    APP_Tx_ptr_out = (APP_Tx_ptr_out + maintenanceTxFlight) % APP_TX_DATA_SIZE;
+    maintenanceTxFlight = 0;
+  }
   /* USER CODE BEGIN 13 */
   UNUSED(Buf);
   UNUSED(Len);
@@ -256,7 +272,11 @@ static int8_t VCP_StartOfFrame_FS()
   uint8_t result = USBD_OK;
   static uint8_t FrameCount = 0;    // modified by OpenTX
 
-  if (FrameCount++ >= CDC_IN_FRAME_INTERVAL)     // modified by OpenTX
+  // A maintenance bridge is serviced every USB frame (1ms on FS), not
+  // by the 50ms Bluetooth command cadence. Work per frame is bounded.
+  if (maintenancePoll) maintenancePoll();
+
+  if (maintenancePoll || FrameCount++ >= CDC_IN_FRAME_INTERVAL)     // modified by OpenTX
   {
     /* Reset the frame counter */
     FrameCount = 0;
@@ -286,8 +306,10 @@ static int8_t VCP_StartOfFrame_FS()
 
     USBD_CDC_SetTxBuffer(&hUsbDevice, &UserTxBufferFS[APP_Tx_ptr_out], length);
     result = USBD_CDC_TransmitPacket(&hUsbDevice);
-    if(result == USBD_OK)
-      APP_Tx_ptr_out += length;
+    if(result == USBD_OK) {
+      if (maintenancePoll) maintenanceTxFlight = length;
+      else APP_Tx_ptr_out += length;
+    }
   }
 
   return result;
@@ -319,7 +341,7 @@ void usbSerialPutc(void*, uint8_t c)
     of the physical USB connection.
   */
 
-  if (!cdcConnected) return;
+  if (!cdcConnected || maintenancePoll) return;
 
   /*
     k and associated variables must be modified
@@ -355,6 +377,21 @@ void usbSerialPutc(void*, uint8_t c)
   */
 static int8_t VCP_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
+  if (maintenancePoll && !cdcDtr) {
+    // Closed/aborted maintenance session: discard intentionally, re-arm to
+    // release any host write already in flight. No byte reaches the UART.
+    USBD_CDC_SetRxBuffer(&hUsbDevice, Buf);
+    USBD_CDC_ReceivePacket(&hUsbDevice);
+    return USBD_OK;
+  }
+  if (maintenancePoll) {
+    // The endpoint remains NAKed; its buffer cannot be reused until Consume.
+    maintenanceRxStarted = DWT->CYCCNT;
+    // Endpoint NAK ownership guarantees that no prior packet remains.
+    if (!maintenancePacket.accept(Buf, *Len)) return USBD_FAIL;
+    if (!*Len) USBD_CDC_ReceivePacket(&hUsbDevice);
+    return USBD_OK;
+  }
   auto _rxCb = receiveDataCb;
   // auto _ctx = receiveDataCbCtx;
 
@@ -418,3 +455,55 @@ const etx_serial_port_t UsbSerialPort = {
 };
 
 // /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+
+void usbSerialMaintenanceBegin(void (*poll)())
+{
+  uint32_t prim = __get_PRIMASK(); __disable_irq();
+  APP_Tx_ptr_in = APP_Tx_ptr_out = 0;
+  maintenancePacket.clear(); maintenanceTxFlight = 0;
+  maintenancePoll = poll;
+  if (!prim) __enable_irq();
+}
+void usbSerialMaintenanceDiscard()
+{
+  // Called from the USB ISR or under the caller's interrupt lock.
+  APP_Tx_ptr_in = APP_Tx_ptr_out = 0;
+  maintenanceTxFlight = 0;
+  if (maintenancePacket.pending() && cdcConnected) {
+    maintenancePacket.clear();
+    USBD_CDC_SetRxBuffer(&hUsbDevice, UserRxBufferFS);
+    USBD_CDC_ReceivePacket(&hUsbDevice);
+  }
+}
+void usbSerialMaintenanceEnd()
+{
+  uint32_t prim = __get_PRIMASK(); __disable_irq();
+  usbSerialMaintenanceDiscard();
+  maintenancePoll = nullptr;
+  if (!prim) __enable_irq();
+}
+bool usbSerialMaintenanceConfigured() { return cdcConnected; }
+bool usbSerialMaintenanceOpen() { return cdcConnected && cdcDtr; }
+bool usbSerialMaintenanceRts() { return cdcRts; }
+uint32_t usbSerialMaintenancePending() {
+  return maintenancePacket.pending();
+}
+bool usbSerialMaintenancePeek(uint8_t* byte) {
+  return maintenancePacket.peek(byte);
+}
+void usbSerialMaintenanceConsume() {
+  if (maintenancePacket.pop()) {
+    USBD_CDC_SetRxBuffer(&hUsbDevice, UserRxBufferFS);
+    USBD_CDC_ReceivePacket(&hUsbDevice);
+  }
+}
+bool usbSerialMaintenanceWrite(uint8_t byte) {
+  if (!usbSerialMaintenanceOpen() || !usbSerialFreeSpace()) return false;
+  UserTxBufferFS[APP_Tx_ptr_in] = byte;
+  APP_Tx_ptr_in = (APP_Tx_ptr_in + 1) % APP_TX_DATA_SIZE;
+  return true;
+}
+
+uint32_t usbSerialMaintenanceAgeCycles() {
+  return maintenancePacket.pending() ? DWT->CYCCNT - maintenanceRxStarted : 0;
+}

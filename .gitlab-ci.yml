@@ -12,6 +12,8 @@ tx15:
     EXTRA_OPTIONS: "-DCLI=ON -DBLUETOOTH=ON -DINTERNAL_GPS=ON"
     FIRMARE_TARGET: firmware
   script:
+    - g++ -std=c++17 -Wall -Wextra -Werror tests/usb-maintenance/test_packet.cpp -o /tmp/test-usb-packet
+    - /tmp/test-usb-packet
     - export SRCDIR="$CI_PROJECT_DIR"
     - export EDGETX_VERSION_SUFFIX="gitlab-$CI_COMMIT_SHORT_SHA"
     - ./tools/build-gh.sh

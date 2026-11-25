@@ -69,3 +69,18 @@ void usbJoystickUpdate();
 
 // USB DFU
 int usbRegisterDFUMedia(const void* dfu_media);
+
+// Exclusive CDC maintenance owner. Ordinary CLI callbacks remain installed,
+// but are bypassed until End. OUT is NAKed while its packet is being drained.
+void usbSerialMaintenanceBegin(void (*poll)());
+void usbSerialMaintenanceEnd();
+bool usbSerialMaintenanceOpen();
+bool usbSerialMaintenanceRts();
+bool usbSerialMaintenanceConfigured();
+bool usbSerialMaintenancePeek(uint8_t* byte);
+void usbSerialMaintenanceConsume();
+bool usbSerialMaintenanceWrite(uint8_t byte);
+void usbSerialMaintenanceDiscard();
+uint32_t usbSerialMaintenancePending();
+
+uint32_t usbSerialMaintenanceAgeCycles();
