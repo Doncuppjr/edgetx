@@ -341,3 +341,12 @@ must not be inferred from this 239-byte bench client.
 Results and timing evidence are preserved under the AiPal USB bench
 directory as ble-ota-result.json, ble-ota-measurements.json and
 ble-connection-timing.json. These files omit the session PIN.
+
+
+## BLE restart confirmation (2026-11-25 UTC)
+
+The operator confirmed Trainer channel operation returned after the completed
+BLE application update and restart. This closes the post-restart functional
+check for that Linux BLE protocol test. No separate assertion is made about
+Back-button timing after this BLE session. Browser end-to-end validation and
+the untested hardware regressions remain pending.
