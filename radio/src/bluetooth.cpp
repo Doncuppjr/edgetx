@@ -23,6 +23,7 @@
 #include "edgetx.h"
 #include "io/frsky_firmware_update.h"
 #include "bluetooth_driver.h"
+#include "bluetooth_update_caps.h"
 #include "os/sleep.h"
 #include "trainer.h"
 #if defined(BLUETOOTH_USB_UPDATE)
@@ -759,22 +760,17 @@ void Bluetooth::wakeup()
     } else if (state == BLUETOOTH_STATE_NAME_SENT && (line != nullptr) &&
                (!strncmp(line, "OK+", 3) || !strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
+      // Each handshake must discover capabilities anew; a legacy module
+      // (or downgraded firmware) must not inherit a previous announcement.
+      updateCapabilities = 0;
       writeString("AT+TXPW2");
       state = BLUETOOTH_STATE_POWER_SENT;
     } else if (state == BLUETOOTH_STATE_POWER_SENT && line &&
                !strncmp(line,"OK+CAPS:1,",10)) {
-      updateCapabilities = 0;
-      const char * token = line+10;
-      while (*token) {
-        size_t len = strcspn(token,",");
-        if (len==11 && !strncmp(token,"UPDATE_WIFI",len)) updateCapabilities |= UPDATE_WIFI;
-        if (len==10 && !strncmp(token,"UPDATE_BLE",len)) updateCapabilities |= UPDATE_BLE;
-#if defined(BLUETOOTH_USB_UPDATE)
-        if (len==11 && !strncmp(token,"UPDATE_UART",len)) updateCapabilities |= UPDATE_UART;
+      updateCapabilities = bluetoothParseUpdateCaps(line);
+#if !defined(BLUETOOTH_USB_UPDATE)
+      updateCapabilities &= ~UPDATE_UART;
 #endif
-        token += len;
-        if (*token==',') ++token;
-      }
     } else if (state == BLUETOOTH_STATE_POWER_SENT &&
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||

@@ -14,6 +14,8 @@ tx15:
   script:
     - g++ -std=c++17 -Wall -Wextra -Werror tests/usb-maintenance/test_packet.cpp -o /tmp/test-usb-packet
     - /tmp/test-usb-packet
+    - g++ -std=c++17 -Wall -Wextra -Werror tests/usb-maintenance/test_caps.cpp -o /tmp/test-bt-caps
+    - /tmp/test-bt-caps
     - export SRCDIR="$CI_PROJECT_DIR"
     - export EDGETX_VERSION_SUFFIX="gitlab-$CI_COMMIT_SHORT_SHA"
     - ./tools/build-gh.sh
