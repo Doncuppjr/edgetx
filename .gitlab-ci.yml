@@ -1,5 +1,6 @@
 stages: [build]
 tx15:
+  tags: [firmware, docker, amd64]
   stage: build
   image: ghcr.io/edgetx/edgetx-dev:2.12
   interruptible: true
