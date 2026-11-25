@@ -80,6 +80,8 @@ bool usbSerialMaintenanceConfigured();
 bool usbSerialMaintenancePeek(uint8_t* byte);
 void usbSerialMaintenanceConsume();
 bool usbSerialMaintenanceWrite(uint8_t byte);
+// Called only after queued IN bytes have completed on USB. Discard cancels it.
+void usbSerialMaintenanceFlush(void (*complete)());
 void usbSerialMaintenanceDiscard();
 uint32_t usbSerialMaintenancePending();
 

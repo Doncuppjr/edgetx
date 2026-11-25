@@ -119,6 +119,7 @@ static void (*baudRateCb)(uint32_t) = nullptr;
 bool cdcConnected = false;
 static volatile bool cdcDtr = false, cdcRts = false;
 static void (*maintenancePoll)() = nullptr;
+static void (*maintenanceDrained)() = nullptr;
 static UsbMaintenancePacket maintenancePacket;
 static uint32_t maintenanceRxStarted = 0;
 static UsbMaintenanceTxFlight maintenanceTxFlight;
@@ -132,7 +133,7 @@ static UsbMaintenanceTxFlight maintenanceTxFlight;
 static int8_t VCP_Init_FS(void)
 {
   cdcDtr = cdcRts = false;
-  maintenancePacket.clear(); maintenanceTxFlight.reset();
+  maintenancePacket.clear(); maintenanceTxFlight.reset(); maintenanceDrained = nullptr;
   cdcConnected = true;
   USBD_CDC_SetTxBuffer(&hUsbDevice, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDevice, UserRxBufferFS);
@@ -147,7 +148,7 @@ static int8_t VCP_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
   cdcConnected = cdcDtr = cdcRts = false;
-  maintenancePacket.clear(); maintenanceTxFlight.reset();
+  maintenancePacket.clear(); maintenanceTxFlight.reset(); maintenanceDrained = nullptr;
   receiveDataCb = nullptr;
   baudRateCb = nullptr;
   APP_Tx_ptr_in = 0;
@@ -260,6 +261,12 @@ static int8_t VCP_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 {
   uint8_t result = USBD_OK;
   maintenanceTxFlight.complete(APP_Tx_ptr_out, APP_TX_DATA_SIZE);
+  if (maintenanceDrained &&
+      maintenanceTxFlight.drained(APP_Tx_ptr_out, APP_Tx_ptr_in)) {
+    auto complete = maintenanceDrained;
+    maintenanceDrained = nullptr;
+    complete();
+  }
   /* USER CODE BEGIN 13 */
   UNUSED(Buf);
   UNUSED(Len);
@@ -468,12 +475,15 @@ void usbSerialMaintenanceBegin(void (*poll)())
   uint32_t prim = __get_PRIMASK(); __disable_irq();
   maintenanceTxFlight.discardQueued(APP_Tx_ptr_out, APP_Tx_ptr_in, APP_TX_DATA_SIZE);
   maintenancePacket.clear();
+  maintenanceDrained = nullptr;
   maintenancePoll = poll;
   if (!prim) __enable_irq();
 }
 void usbSerialMaintenanceDiscard()
 {
   // Called from the USB ISR or under the caller's interrupt lock.
+  // Discarding an unsent acknowledgment must never confirm completion.
+  maintenanceDrained = nullptr;
   maintenanceTxFlight.discardQueued(APP_Tx_ptr_out, APP_Tx_ptr_in, APP_TX_DATA_SIZE);
   if (maintenancePacket.pending() && cdcConnected) {
     maintenancePacket.clear();
@@ -508,6 +518,17 @@ bool usbSerialMaintenanceWrite(uint8_t byte) {
   UserTxBufferFS[APP_Tx_ptr_in] = byte;
   APP_Tx_ptr_in = (APP_Tx_ptr_in + 1) % APP_TX_DATA_SIZE;
   return true;
+}
+
+void usbSerialMaintenanceFlush(void (*complete)())
+{
+  // Maintenance callers run in the USB interrupt. Keep the callback armed
+  // through IN submission; only transfer completion may confirm delivery.
+  maintenanceDrained = complete;
+  if (maintenanceTxFlight.drained(APP_Tx_ptr_out, APP_Tx_ptr_in)) {
+    maintenanceDrained = nullptr;
+    if (complete) complete();
+  }
 }
 
 uint32_t usbSerialMaintenanceAgeCycles() {

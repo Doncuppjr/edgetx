@@ -136,7 +136,7 @@ uint8_t bluetoothIsWriting(void)
 DEFINE_STM32_SERIAL_PORT(BTMaintenance, btUSART, 256, 64);
 static BluetoothUsbStats btUsbCounters = {};
 static volatile bool btUsbRom = false, btUsbRecover = false, btUsbFinish = false;
-static bool btUsbWasOpen = false, btUsbRtsLow = false;
+static bool btUsbWasOpen = false, btUsbCompleting = false;
 static volatile bool btUsbSessionSeen = false;
 static uint32_t btUsbLastCycle = 0, btUsbOverrunBase = 0, btUsbErrorBase = 0;
 static BluetoothUsbHandshake btUsbHandshake;
@@ -155,7 +155,7 @@ static void bluetoothUsbPoll()
     // The first OUT packet may arrive before this SOF observes DTR.
     // Discard only on close; preserve a newly arrived host query on open.
     if (!open) usbSerialMaintenanceDiscard();
-    btUsbHandshake.reset(); btUsbRtsLow = false; btUsbLastCycle = 0;
+    btUsbHandshake.reset(); btUsbCompleting = false; btUsbLastCycle = 0;
     if (open) {
       STM32SerialDriver.clearRxBuffer(_bt_usart_ctx);
       btUsbOverrunBase = stm32SerialRxOverruns(_bt_usart_ctx);
@@ -166,12 +166,9 @@ static void bluetoothUsbPoll()
     btUsbWasOpen = open;
   }
   if (!open) return;
-  if (!usbSerialMaintenanceRts()) btUsbRtsLow = true;
-  // This is a host completion request, not a declaration of update success.
-  // The radio still requires a successful normal module handshake.
-  if (btUsbRom && btUsbHandshake.ready() && btUsbRtsLow && usbSerialMaintenanceRts()) {
-    btUsbFinish = true; return;
-  }
+  // A completion acknowledgment owns the USB IN ring until delivered.
+  // Do not forward application boot chatter or more ROM traffic meanwhile.
+  if (btUsbCompleting) return;
   if (btUsbRecover) return;
   uint32_t cycle = DWT->CYCCNT;
   if (btUsbLastCycle)
@@ -198,8 +195,8 @@ static void bluetoothUsbPoll()
       auto event = btUsbHandshake.feed(byte);
       if (event == BluetoothUsbHandshake::PROBE) {
         btUsbSessionSeen = true;
-        const char* banner = btUsbRom ? "OK+BRIDGE:1,115200,RECOVERY\r\n" :
-                                       "OK+BRIDGE:1,115200,READY\r\n";
+        const char* banner = btUsbRom ? "OK+BRIDGE:2,115200,RECOVERY\r\n" :
+                                       "OK+BRIDGE:2,115200,READY\r\n";
         for (const char* c=banner; *c; ++c) usbSerialMaintenanceWrite(*c);
       } else if (event == BluetoothUsbHandshake::STATUS) {
         char status[240];
@@ -211,6 +208,21 @@ static void bluetoothUsbPoll()
           (unsigned long)btUsbCounters.rxHighWater,(unsigned long)btUsbCounters.txHighWater,
           (unsigned long)btUsbCounters.serviceGapMaxUs,(unsigned)btUsbRom);
         for (const char* c=status; *c; ++c) usbSerialMaintenanceWrite(*c);
+      } else if (event == BluetoothUsbHandshake::FINISH) {
+        // FINISH is recognized only before PROBE on a fresh connection.
+        // Binary ROM payloads can never be interpreted as bridge commands.
+        const char* ack = btUsbRom ? "OK+BRIDGE:FINISH\r\n" : "ERROR\r\n";
+        if (usbSerialFreeSpace() < strlen(ack)) {
+          btUsbRecover = true; return;
+        }
+        for (const char* c=ack; *c; ++c) usbSerialMaintenanceWrite(*c);
+        if (btUsbRom) {
+          btUsbCompleting = true;
+          // This confirms receipt, not successful module restart. The
+          // Bluetooth task still requires a fresh role/identity handshake.
+          usbSerialMaintenanceFlush([]() { btUsbFinish = true; });
+        }
+        return;
       } else if (event == BluetoothUsbHandshake::DOWNLOAD && !btUsbRom) {
         const char* command = "AT+DOWNLOAD\r\n";
         while (*command) {
@@ -243,7 +255,7 @@ bool bluetoothUsbStart()
   etx_serial_init cfg = {115200, ETX_Encoding_8N1, ETX_Dir_TX_RX, ETX_Pol_Normal};
   _bt_usart_ctx = STM32SerialDriver.init(REF_STM32_SERIAL_PORT(BTMaintenance), &cfg);
   btUsbCounters = {};
-  btUsbRom = btUsbRecover = btUsbFinish = btUsbWasOpen = btUsbRtsLow = false;
+  btUsbRom = btUsbRecover = btUsbFinish = btUsbWasOpen = btUsbCompleting = false;
   btUsbLastCycle = 0; btUsbHandshake.reset(); btUsbSessionSeen = false;
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;

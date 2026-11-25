@@ -31,6 +31,7 @@ class UsbMaintenancePacket {
 class UsbMaintenanceTxFlight {
  public:
   void reset() {length=0;start=0;advance=false;}
+  bool drained(uint32_t out,uint32_t in) const {return !length && out==in;}
   void submitted(uint32_t offset,uint32_t count,bool held) {
     start=offset;length=count;advance=held;
   }

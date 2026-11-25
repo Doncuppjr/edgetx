@@ -7,11 +7,15 @@ modules, and their ordinary initialization and FIFOs are unchanged.
 
 Select Bluetooth settings > Update module > USB. EdgeTX reinitializes the
 module, confirms AT+UPDATE=UART / OK+UPDATE:UART, and selects USB CDC.
-After binary serial setup, the browser sends AT+BRIDGE? and must see OK+BRIDGE:1,115200,READY before requesting
+After binary serial setup, the browser sends AT+BRIDGE? and must see OK+BRIDGE:2,115200,READY before requesting
 AT+DOWNLOAD. USB presence, CDC initialization, and host DTR are distinct.
-RTS is not wired to the ESP reset: after verified flash and watchdog restart,
-the browser raises RTS to request return to normal Bluetooth. The radio does
-not confirm restart until its ordinary AT role handshake completes.
+Bridge protocol 2 completes through a fresh management connection after
+verified flash and watchdog restart. The installer sends AT+BRIDGE=FINISH
+before any AT+BRIDGE? query and requires OK+BRIDGE:FINISH. It is rejected
+before ROM entry and never parsed from binary ROM payload. The radio waits
+until the acknowledgment completes on USB before beginning normal Bluetooth
+initialization, and confirms restart only after its ordinary AT role handshake.
+This replaces the protocol-1 RTS request, which failed on the Windows bench.
 
 ## Ownership and buffering
 
@@ -193,3 +197,25 @@ valid. Browser end-to-end, interrupted-write recovery, repeated full sessions,
 hot-plug, Trainer/Telemetry payloads, BLE OTA, sleep/wake, C3 hardware and
 CC2540 hardware remain unvalidated. Codex browser control on the workstation
 also currently fails to launch with CreateProcessWithLogonW error 1920.
+
+
+## Windows validation and completion correction (2026-11-25 UTC)
+
+EdgeTX 2d83ea0e passed pipeline 2709 and was installed with checksum/board-ID
+verification. Windows enumerated one healthy COM25 using usbser (Problem 0),
+replacing the split Code 10/28 interfaces. The operator confirmed pre-ROM
+host-close cancellation and immediate one-press Back dismissal.
+
+A Windows Python esptool run identified C5 chip 23, closed/reopened into ROM
+RECOVERY and synchronized again, wrote the same verified 8 MiB C5 full image,
+and passed both the normal readback and a second whole-image MD5. Write
+time was 124.8 seconds; write plus first verification was 144.359 seconds.
+The watchdog reset was requested, but Windows RTS completion was not observed:
+the radio returned to "Update not confirmed." A longer RTS hold also failed.
+This is a failed completion test, not a successful end-to-end update.
+A post-restart status reported zero RX overruns and one UART error; the latter
+was sampled after module boot and must not be described as an error-free session.
+
+Protocol 2 removes dependence on RTS and acknowledges FINISH through the
+serial data channel on a fresh connection. This correction and its installer
+counterpart still require CI and hardware validation.

@@ -6,7 +6,7 @@
 // a query from the configured host before sending any banner or binary data.
 class BluetoothUsbHandshake {
  public:
-  enum Event { NONE, PROBE, STATUS, DOWNLOAD };
+  enum Event { NONE, PROBE, STATUS, DOWNLOAD, FINISH };
   void reset() { length=0; overflow=false; established=false; }
   bool ready() const { return established; }
   Event feed(uint8_t byte) {
@@ -21,6 +21,7 @@ class BluetoothUsbHandshake {
     if (!overflow) {
       if (!strcmp(line,"AT+BRIDGE?")) {established=true;event=PROBE;}
       else if (!strcmp(line,"AT+BRIDGE=STATUS?")) event=STATUS;
+      else if (!established && !strcmp(line,"AT+BRIDGE=FINISH")) event=FINISH;
       else if (established && !strcmp(line,"AT+DOWNLOAD")) event=DOWNLOAD;
     }
     length=0;overflow=false;

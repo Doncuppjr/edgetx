@@ -14,12 +14,16 @@ int main() {
   // in-flight bytes, drop only queued bytes, and keep DMA ownership on exit.
   UsbMaintenanceTxFlight flight;
   volatile uint32_t txOut=100,txIn=220;
+  assert(!flight.drained(txOut,txIn));
   flight.submitted(100,64,false);txOut=164;
+  assert(!flight.drained(txOut,txOut)); // submitted bytes still own DMA
   flight.discardQueued(txOut,txIn,256);
   assert(txOut==100 && txIn==164);
   flight.discardQueued(txOut,txIn,256); // end before transfer completes
   flight.complete(txOut,256);
   assert(txOut==164 && txIn==164);
+  assert(flight.drained(txOut,txIn));
+  txIn=180;assert(!flight.drained(txOut,txIn)); // queued completion ACK
   txOut=240;txIn=17;
   flight.submitted(240,16,true);
   flight.discardQueued(txOut,txIn,256);
@@ -33,6 +37,8 @@ int main() {
     while (*line) event=handshake.feed(*line++);
     return event;
   };
+  assert(feed("AT+BRIDGE=FINISH\r\n")==BluetoothUsbHandshake::FINISH);
+  assert(!handshake.ready()); // completion stays on the management channel
   assert(feed("AT+DOWNLOAD\r\n")==BluetoothUsbHandshake::NONE);
   assert(feed("OK+BRIDGE:1,115200,READY\r\n")==BluetoothUsbHandshake::NONE);
   assert(!handshake.ready());
@@ -40,6 +46,7 @@ int main() {
   assert(!handshake.ready());
   assert(feed("AT+BRIDGE?\r\n")==BluetoothUsbHandshake::PROBE);
   assert(handshake.ready());
+  assert(feed("AT+BRIDGE=FINISH\r\n")==BluetoothUsbHandshake::NONE);
   assert(feed("AT+DOWNLOAD\r\n")==BluetoothUsbHandshake::DOWNLOAD);
   handshake.reset();
   assert(!handshake.ready());
