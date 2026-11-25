@@ -4,6 +4,23 @@
 #include <vector>
 #include "../../radio/src/hal/bluetooth_usb_handshake.h"
 int main() {
+  // Normal CDC advances out on submission; maintenance must adopt its
+  // in-flight bytes, drop only queued bytes, and keep DMA ownership on exit.
+  UsbMaintenanceTxFlight flight;
+  volatile uint32_t txOut=100,txIn=220;
+  flight.submitted(100,64,false);txOut=164;
+  flight.discardQueued(txOut,txIn,256);
+  assert(txOut==100 && txIn==164);
+  flight.discardQueued(txOut,txIn,256); // end before transfer completes
+  flight.complete(txOut,256);
+  assert(txOut==164 && txIn==164);
+  txOut=240;txIn=17;
+  flight.submitted(240,16,true);
+  flight.discardQueued(txOut,txIn,256);
+  assert(txOut==240 && txIn==0);
+  flight.complete(txOut,256);assert(txOut==0);
+  flight.complete(txOut,256);assert(txOut==0);
+  flight.discardQueued(txOut,txIn,256);assert(txIn==0);
   BluetoothUsbHandshake handshake;
   auto feed=[&](const char* line) {
     BluetoothUsbHandshake::Event event=BluetoothUsbHandshake::NONE;

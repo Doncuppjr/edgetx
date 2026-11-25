@@ -104,3 +104,18 @@ only after this handshake, so initial driver control-line changes cannot
 cancel an otherwise valid armed session. On a recovery connection,
 AT+BRIDGE=STATUS? retrieves counters before AT+BRIDGE? starts binary
 forwarding. CLI is still not needed by the normal installer.
+
+
+With the queried handshake and old Anchor application, the ROM-entry /
+failed-sync run measured TX=243 and RX=161 bytes, zero FIFO overruns, zero
+UART errors, no bytes pending in UART TX, RX high water 12/255 usable bytes,
+TX high water 44/63 usable bytes, and a maximum USB service gap of 1014 us.
+These are short-session measurements, not sustained flashing throughput.
+
+A query sent immediately after DTR assertion could arrive before the first
+SOF observed the open port. The open handler incorrectly discarded that
+new OUT packet. Only close now discards pending input. Closing or changing
+owners also preserves any submitted USB IN ring segment until its actual
+completion callback; queued, unsubmitted output can be discarded safely.
+The host regression test covers adoption of a normal IN transfer into
+maintenance, discard/exit before completion, and ring wrap.

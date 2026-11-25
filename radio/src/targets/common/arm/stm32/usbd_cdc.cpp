@@ -20,6 +20,7 @@
  */
 
 #include "hal/usb_maintenance_packet.h"
+#include "hal/usb_driver.h"
 
 extern "C" {
 
@@ -120,7 +121,7 @@ static volatile bool cdcDtr = false, cdcRts = false;
 static void (*maintenancePoll)() = nullptr;
 static UsbMaintenancePacket maintenancePacket;
 static uint32_t maintenanceRxStarted = 0;
-static volatile uint32_t maintenanceTxFlight = 0;
+static UsbMaintenanceTxFlight maintenanceTxFlight;
 
 
 /* Private functions ---------------------------------------------------------*/
@@ -131,7 +132,7 @@ static volatile uint32_t maintenanceTxFlight = 0;
 static int8_t VCP_Init_FS(void)
 {
   cdcDtr = cdcRts = false;
-  maintenancePacket.clear(); maintenanceTxFlight = 0;
+  maintenancePacket.clear(); maintenanceTxFlight.reset();
   cdcConnected = true;
   USBD_CDC_SetTxBuffer(&hUsbDevice, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDevice, UserRxBufferFS);
@@ -146,7 +147,7 @@ static int8_t VCP_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
   cdcConnected = cdcDtr = cdcRts = false;
-  maintenancePacket.clear(); maintenanceTxFlight = 0;
+  maintenancePacket.clear(); maintenanceTxFlight.reset();
   receiveDataCb = nullptr;
   baudRateCb = nullptr;
   APP_Tx_ptr_in = 0;
@@ -223,7 +224,10 @@ static int8_t VCP_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
     // not LINE_CODING. Initialization is distinct from an opened host port.
     if (pbuf && length == 0) {
       auto req = (USBD_SetupReqTypedef*)pbuf;
-      cdcDtr = (req->wValue & 1) != 0;
+      bool nextDtr = (req->wValue & 1) != 0;
+      if (cdcDtr && !nextDtr && maintenancePoll)
+        usbSerialMaintenanceDiscard();
+      cdcDtr = nextDtr;
       cdcRts = (req->wValue & 2) != 0;
     }
     break;
@@ -255,10 +259,7 @@ static int8_t VCP_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t VCP_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 {
   uint8_t result = USBD_OK;
-  if (maintenancePoll && maintenanceTxFlight) {
-    APP_Tx_ptr_out = (APP_Tx_ptr_out + maintenanceTxFlight) % APP_TX_DATA_SIZE;
-    maintenanceTxFlight = 0;
-  }
+  maintenanceTxFlight.complete(APP_Tx_ptr_out, APP_TX_DATA_SIZE);
   /* USER CODE BEGIN 13 */
   UNUSED(Buf);
   UNUSED(Len);
@@ -307,8 +308,8 @@ static int8_t VCP_StartOfFrame_FS()
     USBD_CDC_SetTxBuffer(&hUsbDevice, &UserTxBufferFS[APP_Tx_ptr_out], length);
     result = USBD_CDC_TransmitPacket(&hUsbDevice);
     if(result == USBD_OK) {
-      if (maintenancePoll) maintenanceTxFlight = length;
-      else APP_Tx_ptr_out += length;
+      maintenanceTxFlight.submitted(APP_Tx_ptr_out, length, maintenancePoll != nullptr);
+      if (!maintenancePoll) APP_Tx_ptr_out += length;
     }
   }
 
@@ -459,16 +460,15 @@ const etx_serial_port_t UsbSerialPort = {
 void usbSerialMaintenanceBegin(void (*poll)())
 {
   uint32_t prim = __get_PRIMASK(); __disable_irq();
-  APP_Tx_ptr_in = APP_Tx_ptr_out = 0;
-  maintenancePacket.clear(); maintenanceTxFlight = 0;
+  maintenanceTxFlight.discardQueued(APP_Tx_ptr_out, APP_Tx_ptr_in, APP_TX_DATA_SIZE);
+  maintenancePacket.clear();
   maintenancePoll = poll;
   if (!prim) __enable_irq();
 }
 void usbSerialMaintenanceDiscard()
 {
   // Called from the USB ISR or under the caller's interrupt lock.
-  APP_Tx_ptr_in = APP_Tx_ptr_out = 0;
-  maintenanceTxFlight = 0;
+  maintenanceTxFlight.discardQueued(APP_Tx_ptr_out, APP_Tx_ptr_in, APP_TX_DATA_SIZE);
   if (maintenancePacket.pending() && cdcConnected) {
     maintenancePacket.clear();
     USBD_CDC_SetRxBuffer(&hUsbDevice, UserRxBufferFS);

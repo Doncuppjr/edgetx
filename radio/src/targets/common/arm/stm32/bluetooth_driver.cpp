@@ -152,7 +152,9 @@ static void bluetoothUsbPoll()
   if (!btMaintenance || !_bt_usart_ctx) return;
   bool open = usbSerialMaintenanceOpen();
   if (open != btUsbWasOpen) {
-    usbSerialMaintenanceDiscard();
+    // The first OUT packet may arrive before this SOF observes DTR.
+    // Discard only on close; preserve a newly arrived host query on open.
+    if (!open) usbSerialMaintenanceDiscard();
     btUsbHandshake.reset(); btUsbRtsLow = false; btUsbLastCycle = 0;
     if (open) {
       STM32SerialDriver.clearRxBuffer(_bt_usart_ctx);
