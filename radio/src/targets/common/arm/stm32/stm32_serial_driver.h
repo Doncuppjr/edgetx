@@ -56,3 +56,12 @@ extern const etx_serial_driver_t STM32SerialDriver;
   }
 
 #define REF_STM32_SERIAL_PORT(p) ((void*)& p ## _STM32Serial)
+
+// Checked FIFO access for bounded maintenance forwarding (never silently drops).
+bool stm32SerialTrySendByte(void* ctx, uint8_t byte);
+uint32_t stm32SerialRxOverruns(void* ctx);
+uint32_t stm32SerialRxErrors(void* ctx);
+uint32_t stm32SerialTxPending(void* ctx);
+
+uint32_t stm32SerialRxHighWater(void* ctx);
+uint32_t stm32SerialRxAgeCycles(void* ctx);

@@ -38,6 +38,10 @@ struct stm32_send_buffer {
 struct stm32_serial_state {
   const stm32_serial_port* sp;
   stm32_buffer_state rx_buf;
+  uint32_t rxOverruns;
+  uint32_t rxErrors;
+  uint32_t rxHighWater;
+  uint32_t rxQueueStarted;
   union {
     stm32_buffer_state tx_fifo;
     stm32_send_buffer  tx_buf;
@@ -252,11 +256,16 @@ static void _on_rx_fifo(uint8_t data)
   stm32_buffer_state* buf_st = (stm32_buffer_state*)&st->rx_buf;
 
   auto buf_len = st->sp->rx_buffer.length;
-  if (_fifo_full(buf_st, buf_len)) return;
+  if (_fifo_full(buf_st, buf_len)) { ++st->rxOverruns; return; }
 
   auto buf = st->sp->rx_buffer.buffer;
+  if (buf_st->ridx == buf_st->widx) st->rxQueueStarted = DWT->CYCCNT;
   _fifo_push(data, buf_st, buf_len, buf);
+  uint32_t depth = (buf_st->widx - buf_st->ridx) & (buf_len - 1);
+  if (depth > st->rxHighWater) st->rxHighWater = depth;
 }
+
+static void _on_rx_error() { ++_isr_state->rxErrors; }
 
 static void* stm32_serial_init(void* hw_def, const etx_serial_init* params)
 {
@@ -270,6 +279,8 @@ static void* stm32_serial_init(void* hw_def, const etx_serial_init* params)
   // Set serial port instance *before* in case an interrupt is triggered
   // before this method returns.
   st->sp = sp;
+  st->rxOverruns = st->rxErrors = st->rxHighWater = st->rxQueueStarted = 0;
+  st->callbacks.on_error = _on_rx_error;
 
   if (!stm32_usart_init(usart, params)) {
     st->sp = nullptr;
@@ -639,3 +650,33 @@ const etx_serial_driver_t STM32SerialDriver = {
   .setIdleCb = stm32_serial_set_idle_cb,
   .setBaudrateCb = nullptr,
 };
+
+bool stm32SerialTrySendByte(void* ctx, uint8_t byte)
+{
+  auto st = (stm32_serial_state*)ctx;
+  if (!st || !st->sp || !st->sp->tx_buffer.length) return false;
+  auto len = st->sp->tx_buffer.length;
+  if (_fifo_full(&st->u.tx_fifo, len)) return false;
+  stm32_serial_send_byte(ctx, byte);
+  return true;
+}
+uint32_t stm32SerialRxOverruns(void* ctx) {
+  return ctx ? ((stm32_serial_state*)ctx)->rxOverruns : 0;
+}
+uint32_t stm32SerialRxErrors(void* ctx) {
+  return ctx ? ((stm32_serial_state*)ctx)->rxErrors : 0;
+}
+uint32_t stm32SerialTxPending(void* ctx) {
+  auto st = (stm32_serial_state*)ctx;
+  return st && st->sp ? (st->u.tx_fifo.widx - st->u.tx_fifo.ridx) &
+                              (st->sp->tx_buffer.length - 1) : 0;
+}
+
+uint32_t stm32SerialRxHighWater(void* ctx) {
+  return ctx ? ((stm32_serial_state*)ctx)->rxHighWater : 0;
+}
+uint32_t stm32SerialRxAgeCycles(void* ctx) {
+  auto st = (stm32_serial_state*)ctx;
+  return st && st->rx_buf.ridx != st->rx_buf.widx ?
+                DWT->CYCCNT - st->rxQueueStarted : 0;
+}
