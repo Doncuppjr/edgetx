@@ -137,6 +137,7 @@ DEFINE_STM32_SERIAL_PORT(BTMaintenance, btUSART, 256, 64);
 static BluetoothUsbStats btUsbCounters = {};
 static volatile bool btUsbRom = false, btUsbRecover = false, btUsbFinish = false;
 static bool btUsbWasOpen = false, btUsbCompleting = false;
+static uint32_t btUsbConnectionEpoch = 0;
 static volatile bool btUsbSessionSeen = false;
 static uint32_t btUsbLastCycle = 0, btUsbOverrunBase = 0, btUsbErrorBase = 0;
 static BluetoothUsbHandshake btUsbHandshake;
@@ -151,7 +152,11 @@ static void bluetoothUsbPoll()
 {
   if (!btMaintenance || !_bt_usart_ctx) return;
   bool open = usbSerialMaintenanceOpen();
-  if (open != btUsbWasOpen) {
+  uint32_t epoch = usbSerialMaintenanceConnectionEpoch();
+  if (open != btUsbWasOpen || epoch != btUsbConnectionEpoch) {
+    // A host can close/reopen between SOFs. Observe control-request epochs,
+    // not just the sampled DTR level, before accepting management commands.
+    btUsbConnectionEpoch = epoch;
     // The first OUT packet may arrive before this SOF observes DTR.
     // Discard only on close; preserve a newly arrived host query on open.
     if (!open) usbSerialMaintenanceDiscard();
@@ -257,6 +262,7 @@ bool bluetoothUsbStart()
   btUsbCounters = {};
   btUsbRom = btUsbRecover = btUsbFinish = btUsbWasOpen = btUsbCompleting = false;
   btUsbLastCycle = 0; btUsbHandshake.reset(); btUsbSessionSeen = false;
+  btUsbConnectionEpoch = usbSerialMaintenanceConnectionEpoch();
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
   btMaintenance = _bt_usart_ctx != nullptr;

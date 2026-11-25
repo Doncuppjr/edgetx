@@ -76,6 +76,7 @@ void usbSerialMaintenanceBegin(void (*poll)());
 void usbSerialMaintenanceEnd();
 bool usbSerialMaintenanceOpen();
 bool usbSerialMaintenanceRts();
+uint32_t usbSerialMaintenanceConnectionEpoch();
 bool usbSerialMaintenanceConfigured();
 bool usbSerialMaintenancePeek(uint8_t* byte);
 void usbSerialMaintenanceConsume();

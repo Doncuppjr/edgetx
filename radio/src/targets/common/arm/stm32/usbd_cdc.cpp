@@ -118,6 +118,7 @@ static void (*baudRateCb)(uint32_t) = nullptr;
 
 bool cdcConnected = false;
 static volatile bool cdcDtr = false, cdcRts = false;
+static volatile uint32_t cdcConnectionEpoch = 0;
 static void (*maintenancePoll)() = nullptr;
 static void (*maintenanceDrained)() = nullptr;
 static UsbMaintenancePacket maintenancePacket;
@@ -148,6 +149,7 @@ static int8_t VCP_DeInit_FS(void)
 {
   /* USER CODE BEGIN 4 */
   cdcConnected = cdcDtr = cdcRts = false;
+  ++cdcConnectionEpoch;
   maintenancePacket.clear(); maintenanceTxFlight.reset(); maintenanceDrained = nullptr;
   receiveDataCb = nullptr;
   baudRateCb = nullptr;
@@ -226,6 +228,7 @@ static int8_t VCP_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
     if (pbuf && length == 0) {
       auto req = (USBD_SetupReqTypedef*)pbuf;
       bool nextDtr = (req->wValue & 1) != 0;
+      if (nextDtr != cdcDtr) ++cdcConnectionEpoch;
       if (cdcDtr && !nextDtr && maintenancePoll)
         usbSerialMaintenanceDiscard();
       cdcDtr = nextDtr;
@@ -501,6 +504,7 @@ void usbSerialMaintenanceEnd()
 bool usbSerialMaintenanceConfigured() { return cdcConnected; }
 bool usbSerialMaintenanceOpen() { return cdcConnected && cdcDtr; }
 bool usbSerialMaintenanceRts() { return cdcRts; }
+uint32_t usbSerialMaintenanceConnectionEpoch() { return cdcConnectionEpoch; }
 uint32_t usbSerialMaintenancePending() {
   return maintenancePacket.pending();
 }
