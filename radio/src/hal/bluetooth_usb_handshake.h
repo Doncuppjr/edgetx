@@ -31,3 +31,10 @@ class BluetoothUsbHandshake {
   uint8_t length=0;
   bool overflow=false, established=false;
 };
+
+
+template<class Tick>
+inline bool bluetoothUsbRestartTimedOut(Tick now,Tick started,bool exhausted)
+{
+  return exhausted || Tick(now-started)>=2000; // 20 seconds, wrap-safe
+}

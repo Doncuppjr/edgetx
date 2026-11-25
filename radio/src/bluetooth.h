@@ -100,8 +100,10 @@ class Bluetooth
     char updatePin[7] = {};
     bool updateFailed = false;
     void cancelOta();
+    void requestOtaCancel() { otaCancelRequested = true; }
+    volatile bool otaCancelRequested = false;
     enum UsbPhase : uint8_t { USB_NONE, USB_WAITING, USB_RUNNING,
-                              USB_RECOVERY, USB_RESTARTING, USB_RESTORED };
+                              USB_RECOVERY, USB_RESTARTING, USB_RESTORED, USB_RESTART_FAILED };
     UsbPhase usbPhase = USB_NONE;
     bool usbHostSeen = false;
     bool usbRoleAckSeen = false;

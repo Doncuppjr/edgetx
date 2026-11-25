@@ -4,6 +4,12 @@
 #include <vector>
 #include "../../radio/src/hal/bluetooth_usb_handshake.h"
 int main() {
+  assert(!bluetoothUsbRestartTimedOut<uint32_t>(1999,0,false));
+  assert(bluetoothUsbRestartTimedOut<uint32_t>(2000,0,false));
+  assert(bluetoothUsbRestartTimedOut<uint32_t>(1,0,true));
+  assert(!bluetoothUsbRestartTimedOut<uint16_t>(1982,65520,false));
+  assert(bluetoothUsbRestartTimedOut<uint16_t>(1984,65520,false));
+  assert(bluetoothUsbRestartTimedOut<uint32_t>(1984,0xfffffff0,false));
   // Normal CDC advances out on submission; maintenance must adopt its
   // in-flight bytes, drop only queued bytes, and keep DMA ownership on exit.
   UsbMaintenanceTxFlight flight;

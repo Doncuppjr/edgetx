@@ -81,21 +81,24 @@ class BluetoothOtaDialog : public DynamicMessageDialog
             case Bluetooth::USB_RUNNING: return std::string("USB forwarding. Keep USB connected.");
             case Bluetooth::USB_RECOVERY: return std::string("Update not confirmed. Reconnect installer to retry, or power-cycle module.");
             case Bluetooth::USB_RESTARTING: return std::string("Checking module restart...");
+            case Bluetooth::USB_RESTART_FAILED: return std::string("Restart not confirmed. Power-cycle the radio.");
             case Bluetooth::USB_RESTORED: return std::string("Module restarted. Bluetooth restored.");
             default: break;
           }
         }
         if (!bluetooth.updatePin[0]) return std::string("Preparing module...");
         return std::string(bluetooth.updateMethod == Bluetooth::UPDATE_WIFI ? "Wi-Fi password: BT" : "Bluetooth PIN: ") + bluetooth.updatePin;
-      }, "Back returns to Bluetooth.")
+      }, "Back closes this screen.")
   {
   }
 
  protected:
   void onCancel() override
   {
-    bluetooth.cancelOta();
-    if (bluetooth.usbPhase != Bluetooth::USB_RECOVERY) deleteLater();
+    // Close on the first Back event. The Bluetooth task owns cancellation,
+    // including preserving an interrupted ROM session for installer retry.
+    bluetooth.requestOtaCancel();
+    deleteLater();
   }
   void onClicked() override { onCancel(); }
 };
@@ -134,6 +137,14 @@ BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& gri
       [=]() -> uint8_t {
         auto menu = new Menu();
         menu->setTitle("Module update method");
+#if defined(BLUETOOTH_USB_UPDATE)
+        if (bluetooth.state == BLUETOOTH_STATE_USB_ACTIVE ||
+            bluetooth.usbPhase == Bluetooth::USB_RESTARTING ||
+            bluetooth.usbPhase == Bluetooth::USB_RESTART_FAILED) {
+          menu->addLine("USB update status", [](){ new BluetoothOtaDialog(); });
+          return 0;
+        }
+#endif
         auto start = [](Bluetooth::UpdateMethod method) {
           new ConfirmDialog("Bluetooth update",
             "Stop Bluetooth and update the module?",

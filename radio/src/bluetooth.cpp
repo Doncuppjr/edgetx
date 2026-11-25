@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include "edgetx.h"
+#include "hal/bluetooth_usb_handshake.h"
 #include "io/frsky_firmware_update.h"
 #include "bluetooth_driver.h"
 #include "bluetooth_update_caps.h"
@@ -299,7 +300,8 @@ void Bluetooth::forwardTelemetry(const uint8_t * packet)
   // Do not interleave live Telemetry with AT negotiation or module updating.
   if (otaRequested || state == BLUETOOTH_STATE_OTA_WAIT_ACK ||
       state == BLUETOOTH_STATE_OTA_ACTIVE ||
-      state == BLUETOOTH_STATE_USB_ACTIVE || usbPhase == USB_RESTARTING) return;
+      state == BLUETOOTH_STATE_USB_ACTIVE || usbPhase == USB_RESTARTING ||
+      usbPhase == USB_RESTART_FAILED) return;
   crc = 0x00;
 
   buffer[bufferIndex++] = START_STOP; // start byte
@@ -421,6 +423,7 @@ void Bluetooth::requestOta(UpdateMethod method)
   // Generic AT+OTA extension; complete normal AT setup first, before
   // the module enters a binary streaming Trainer or Telemetry role.
   if (!(updateCapabilities & method)) return;
+  otaCancelRequested = false;
   updateMethod = method;
   usbPhase = USB_NONE;
 #if defined(BLUETOOTH_USB_UPDATE)
@@ -492,6 +495,16 @@ void Bluetooth::cancelOta()
 
 void Bluetooth::wakeup()
 {
+  // GUI dismissal must not wait for UART shutdown or the module reset hold.
+  if (otaCancelRequested) {
+    otaCancelRequested = false;
+#if defined(BLUETOOTH_USB_UPDATE)
+    bool completing = state == BLUETOOTH_STATE_USB_ACTIVE &&
+                      bluetoothUsbFinishRequested();
+    if (!completing)
+#endif
+      cancelOta();
+  }
 #if defined(BLUETOOTH_USB_UPDATE)
   if (state == BLUETOOTH_STATE_USB_ACTIVE) {
     // handleUsbConnection resets this on cable removal. Keep retries in CDC,
@@ -506,6 +519,7 @@ void Bluetooth::wakeup()
       // restart. Success is not displayed until the normal AT role handshake.
       cancelOta();
       updateMethod = UPDATE_UART; usbPhase = USB_RESTARTING;
+      otaRequestTime = now;
       return;
     }
     bool open = bluetoothUsbOpen();
@@ -525,6 +539,11 @@ void Bluetooth::wakeup()
     return;
   }
 #endif
+  if (usbPhase == USB_RESTARTING &&
+      bluetoothUsbRestartTimedOut<tmr10ms_t>(
+          get_tmr10ms(),otaRequestTime,initExhausted))
+    usbPhase = USB_RESTART_FAILED;
+
   if (state != BLUETOOTH_STATE_OFF) {
     if (bluetoothIsWriting()) {
       return;
@@ -810,9 +829,11 @@ void Bluetooth::wakeup()
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
-      if (usbPhase == USB_RESTARTING && !usbRoleAckSeen) return;
+      if ((usbPhase == USB_RESTARTING || usbPhase == USB_RESTART_FAILED) &&
+          !usbRoleAckSeen) return;
       state = BLUETOOTH_STATE_IDLE;
-      if (usbPhase == USB_RESTARTING) usbPhase = USB_RESTORED;
+      if (usbPhase == USB_RESTARTING || usbPhase == USB_RESTART_FAILED)
+        usbPhase = USB_RESTORED;
       // Successful AT role setup closes the startup retry window. Keep
       // postInitRecoveryUsed independent, so a late ERROR cannot trigger
       // an unlimited number of additional startup sequences.
