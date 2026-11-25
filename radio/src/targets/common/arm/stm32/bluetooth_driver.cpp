@@ -174,7 +174,10 @@ static void bluetoothUsbPoll()
   // A completion acknowledgment owns the USB IN ring until delivered.
   // Do not forward application boot chatter or more ROM traffic meanwhile.
   if (btUsbCompleting) return;
-  if (btUsbRecover) return;
+  // A failed UART stream must not block management status/FINISH on a fresh
+  // connection. Module reboot chatter can cause framing errors after a
+  // verified flash; no such bytes may resume binary forwarding.
+  if (btUsbRecover && btUsbHandshake.ready()) return;
   uint32_t cycle = DWT->CYCCNT;
   if (btUsbLastCycle)
     btMax(btUsbCounters.serviceGapMaxUs, btCyclesUs(cycle - btUsbLastCycle));
@@ -188,12 +191,14 @@ static void bluetoothUsbPoll()
   btUsbCounters.uartErrors = stm32SerialRxErrors(_bt_usart_ctx);
   if (btUsbCounters.overruns != btUsbOverrunBase ||
       btUsbCounters.uartErrors != btUsbErrorBase) {
-    btUsbRecover = true; return;
+    btUsbRecover = true;
+    if (btUsbHandshake.ready()) return;
   }
   // Do not enter the ROM automatically. The first complete host line must
   // explicitly request DOWNLOAD after the UI/AT authorization handshake.
   uint8_t byte;
   for (unsigned budget = 0; budget < 64; ++budget) {
+    if (btUsbRecover && btUsbHandshake.ready()) break;
     if (!usbSerialMaintenancePeek(&byte)) break;
     if (!btUsbHandshake.ready() || !btUsbRom) {
       usbSerialMaintenanceConsume();
@@ -245,7 +250,7 @@ static void bluetoothUsbPoll()
     }
   }
   btMax(btUsbCounters.txHighWater, stm32SerialTxPending(_bt_usart_ctx));
-  if (!btUsbHandshake.ready()) return;
+  if (!btUsbHandshake.ready() || btUsbRecover) return;
   for (unsigned budget = 0; budget < 256 && usbSerialFreeSpace(); ++budget) {
     if (!STM32SerialDriver.getByte(_bt_usart_ctx, &byte)) break;
     if (!usbSerialMaintenanceWrite(byte)) { btUsbRecover = true; break; }
