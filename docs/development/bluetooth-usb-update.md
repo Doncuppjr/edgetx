@@ -9,7 +9,7 @@ Select Bluetooth settings > Update module > USB. EdgeTX reinitializes the
 module, confirms AT+UPDATE=UART / OK+UPDATE:UART, and selects USB CDC.
 After binary serial setup, the browser sends AT+BRIDGE? and must see OK+BRIDGE:1,115200,READY before requesting
 AT+DOWNLOAD. USB presence, CDC initialization, and host DTR are distinct.
-RTS is not wired to the ESP reset: after verified flash and software restart,
+RTS is not wired to the ESP reset: after verified flash and watchdog restart,
 the browser raises RTS to request return to normal Bluetooth. The radio does
 not confirm restart until its ordinary AT role handshake completes.
 
@@ -32,16 +32,25 @@ is surfaced as recovery, never success.
 
 Back, DTR close, or 120 seconds without starting ROM entry cancels an armed
 application session and restores normal initialization. After DOWNLOAD has
-been requested, PH11 cannot reset a chip running ROM. Host close, USB
+been requested, PH11 cannot reset a chip running ROM. Back dismisses the
+status dialog immediately and queues cancellation for the Bluetooth task.
+An interrupted ROM session retains UART ownership in the background;
+Update module > USB update status reopens it. It does not offer Wi-Fi/BLE
+while that UART session is active. Host close, USB
 disconnect, a UART error, or 300 seconds without traffic retains exclusive
 UART ownership and displays recovery. Reopen the installer to resync in ROM;
 its banner becomes OK+BRIDGE:1,115200,RECOVERY. A retry does not reissue
 AT commands to ROM. Alternatively power-cycle the module/radio.
 
-After a verified write the browser uses ROM software restart, not standard
-USB serial auto-reset. Interrupted writes may leave an unbootable image;
+After a verified write the browser uses the target-specific RTC watchdog
+reset from Espressif esptool 5.3.1, not standard USB serial auto-reset.
+The FLASH_END-based soft restart did not restore the tested C5 application.
+esptool-js 0.7.1 leaves C5 watchdogReset as a TODO, so the installer uses its
+writeReg API with the same C3/C5 reset-register sequence as maintained
+Python esptool. The detected chip family is verified before any reset write. Interrupted writes may leave an unbootable image;
 do not treat a PH11 pulse or a closed host port as successful recovery.
-Hardware validation of both chips and reset paths remains required.
+C5 full-image writing, readback, recovery reconnect, and watchdog restart
+have been validated on the TX15. C3 hardware remains unvalidated.
 
 ## Measurements
 
@@ -119,3 +128,68 @@ owners also preserves any submitted USB IN ring segment until its actual
 completion callback; queued, unsubmitted output can be discarded safely.
 The host regression test covers adoption of a normal IN transfer into
 maintenance, discard/exit before completion, and ring wrap.
+
+
+## C5 full-image and restart validation (2026-11-25 UTC)
+
+EdgeTX f77aec3a73756c971ccdba8346aa0896a2f0c71a passed pipeline 2703
+and was installed after tx15 board-ID and UF2 checksum verification.
+Anchor 95c63993e66c30367a62d9275db293652052b086 passed pipeline 2704,
+including all four firmware variants and installer packaging. Its C5
+application was bootstrapped through the existing Wi-Fi portal, which
+returned "Update verified. ANCHOR will restart."
+
+Restoring UART0 native RX IOMUX before the authorized software reset fixed
+ROM synchronization: the bridge identified ESP32-C5, chip ID 23.
+A deliberately closed identification session reopened with RECOVERY and
+successfully completed a full ROM write at 115200 without a stub.
+
+Full image: 8388608 bytes; SHA-256
+6990702f1b3ad57a87c9410a0799d46ddd17100190abe20919867e4870f4e11c.
+Esptool compressed it to 1048054 bytes and reported 121.9 seconds for the
+write. The default esptool readback and a second explicit whole-image MD5
+both passed. Its write-plus-first-verification API call took 144.985 seconds.
+
+Post-run counters: accepted UART TX 1084801 bytes, forwarded RX 15796,
+RX high water 12/255, TX high water 63/63, USB packet high water 64,
+zero RX overruns, zero UART errors, maximum USB service gap 1030 us,
+maximum host-packet age 5962 us, maximum module-queue age 1003 us.
+The full TX FIFO is handled with endpoint backpressure; no normal FIFO
+increase was needed. These measurements include ROM and protocol overhead.
+
+FLASH_END-based soft restart did not complete normal initialization.
+Power cycling restored Bluetooth, confirming the flashed image boots.
+A separate no-write ROM session using esptool's C5 watchdog_reset returned
+to the application's fresh role handshake, and the operator confirmed
+"Module restarted. Bluetooth restored."
+
+The dialog Back UX is being changed so it never waits for UART recovery.
+Restart confirmation now has a 20-second deadline / exhausted-init failure
+message and continues to block Telemetry until a fresh role ACK and identity
+reply. Browser end-to-end, interrupted-write, Trainer/Telemetry payload,
+BLE OTA, sleep/wake, C3 hardware, and CC2540 hardware tests remain pending.
+
+## Windows host follow-up (2026-11-25 UTC)
+
+The installed radio still runs f77aec3a. Windows enumerates the radio's
+class-zero serial device as a composite parent with separate interface children:
+control COM24 Code 10 and data interface Code 28. No browser flash was started.
+The proposed fix identifies Serial mode as one CDC ACM device (class/subclass
+02/02), matching Microsoft's Usbser binding guidance:
+https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/usb-driver-installation-based-on-compatible-ids
+The other-speed qualifier is updated consistently. HID, storage and DFU device
+identification stays unchanged. Commit 2d83ea0e762dba4586d498838ce4347bf2d75be9
+is in CI; Windows enumeration must be retested after installation.
+
+The same pending UF2 includes immediate Back dismissal with deferred UART
+cancellation, a 20-second restart deadline, preserving CDC while arming, and
+disabling/clearing the USB IRQ before peripheral clock teardown. SOF forwarding
+also checks configured state and live class data. These address identified
+unsafe paths; they do not prove the cause of the operator-reported Emergency
+mode during USB connection.
+
+Existing successful ROM flashing and watchdog-reset results above remain
+valid. Browser end-to-end, interrupted-write recovery, repeated full sessions,
+hot-plug, Trainer/Telemetry payloads, BLE OTA, sleep/wake, C3 hardware and
+CC2540 hardware remain unvalidated. Codex browser control on the workstation
+also currently fails to launch with CreateProcessWithLogonW error 1920.
