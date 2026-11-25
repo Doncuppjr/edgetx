@@ -298,3 +298,46 @@ Anchor cb5f04cfa3617f56836f7cee8dff5c0ae1cee64b passed pipeline 2717:
 all four firmware variants, 15 installer host tests and packaging/integration
 checks. Browser end-to-end and remaining OTA/hardware checks are still tracked
 separately; do not infer their completion from these CI results.
+
+## BLE OTA protocol validation and throughput (2026-11-25 UTC)
+
+The Linux bench client exercised the existing dedicated BLE update service
+on C5 production firmware 95c63993. The first connection attempt timed out
+before authentication or any firmware write. A fresh attempt authenticated
+one displayed session-PIN challenge, then successfully read the protected
+status characteristic.
+
+The client began an application-only update, committed 239 bytes, sent
+ABORT, and received status 3 / offset 0. It then restarted the upload and
+sent the entire 1663632-byte CI application, checking every committed
+offset. Its SHA-256 before transmission was
+44768d537140ac78b26ce09c9e5e3d5528afd6943db57ca93f7a6ab80ec51284.
+The module returned status 2 with the exact final byte count, confirming
+its image-validation and boot-selection path. The data upload took
+809.885 seconds. Post-restart Trainer operation is awaiting operator
+confirmation; do not infer it from the final GATT acknowledgment.
+
+This was a Linux protocol test, not a Web Bluetooth browser validation.
+It used 239 data bytes plus the five-byte command/offset header. Direct
+BlueZ characteristic properties reported negotiated MTU 247. Bleak's
+mtu_size accessor printed its default placeholder 23, which was not the
+observed characteristic MTU.
+
+AiPal's controller reported LE1MTX/LE1MRX only; its BR/EDR 2M/3M capabilities
+are not LE 2M PHY support. The initial transfer rate was about 1094 bytes/s.
+During the same connection, BlueZ's native HCI helper requested a 15 ms
+interval. The controller's Connection Update Complete event reported
+success, interval 15 ms, latency zero and supervision timeout five seconds.
+The subsequent measured rate was about 3566 bytes/s. This indicates
+connection timing and the per-chunk write/read acknowledgment cycle are
+major throughput limits in this test.
+
+The interval adjustment was confined to the bench connection. Adapter
+defaults remained min 24 / max 40 (1.25 ms units), latency zero. No firmware
+connection-profile or browser pacing change was made. The experimental
+browser still uses conservative 15-byte data payloads; its performance
+must not be inferred from this 239-byte bench client.
+
+Results and timing evidence are preserved under the AiPal USB bench
+directory as ble-ota-result.json, ble-ota-measurements.json and
+ble-connection-timing.json. These files omit the session PIN.
