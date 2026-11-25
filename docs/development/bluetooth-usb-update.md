@@ -273,3 +273,28 @@ ROM request was sent by that failed attempt. The installer now polls the
 non-establishing STATUS query until maintenance is ready before sending its
 single PROBE/DOWNLOAD sequence. This preparation change passes 15 JS host tests.
 Browser end-to-end testing remains pending.
+
+
+## Popup-focus fix hardware follow-up (2026-11-25 UTC)
+
+EdgeTX 14d056438ae3e2b83483aea43538202502b42032 passed pipeline 2716,
+including the production popup-stack host regression. UF2 SHA-256:
+9556e1a05e391f6aa18141057cd10def9e78bef577c7e77fc6846face566c7e2.
+Board-ID tx15, source checksum and backup were checked before installation.
+
+The radio remained connected to AiPal, so this repeat exercised Linux CDC.
+A no-write C5 ROM identification session closed, the operator unplugged and
+reconnected USB while the radio stayed on, and AiPal observed re-enumeration.
+RECOVERY synchronized and watchdog restart/FINISH were acknowledged with
+zero UART errors and overruns. The operator confirmed the restored message
+and prompt closure on the first short physical RTN tap.
+
+This is one tested repeat of the previously troublesome cable-reconnect
+sequence. The concrete popup-stack lifetime defect is fixed and regression-
+tested; the hardware result does not prove every intermittent delay or the
+earlier Emergency-mode report has the same cause.
+
+Anchor cb5f04cfa3617f56836f7cee8dff5c0ae1cee64b passed pipeline 2717:
+all four firmware variants, 15 installer host tests and packaging/integration
+checks. Browser end-to-end and remaining OTA/hardware checks are still tracked
+separately; do not infer their completion from these CI results.
