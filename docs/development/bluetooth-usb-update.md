@@ -45,7 +45,7 @@ Hardware validation of both chips and reset paths remains required.
 
 ## Measurements
 
-With CLI-enabled bench firmware, bluetooth usbstatus reports accepted TX
+With CLI-enabled bench firmware, bt usbstatus reports accepted TX
 and forwarded RX bytes; UART RX/TX and USB pending-packet high-water marks;
 RX FIFO overruns and UART framing/overrun errors; maximum USB service gap;
 and maximum host-packet/module-queue age in microseconds. Queue ages are
@@ -63,3 +63,27 @@ consumption, and byte-exact repeated transfers. CI compiles TX15 with CLI,
 Bluetooth and internal GPS. Compilation and host tests are not hardware
 validation. Bench checks must cover close/disconnect/retry, successful
 readback and restart, Trainer, Telemetry, Wi-Fi/BLE OTA, and sleep/wake.
+
+
+## TX15 bench results (2026-11-25 UTC)
+
+CI validated Anchor 3c45caf8343c484a42bcd194b4be43c47191f9bf in
+pipeline 2694: C5/C3 production and debug, unit tests, generated installer
+and artifact integration tests all passed. EdgeTX 7e265035c47a67ac1e7b06b9bcc72c846e854ced
+passed TX15 build and host tests in pipeline 2697.
+
+The C5 application was uploaded through the existing Wi-Fi portal, which
+returned "Update verified. ANCHOR will restart." Its SHA-256 was
+65987a8d4cd27f713f5fb80c5378efc4441f93dd870ff6b5dabba78811e26ec5.
+The TX15 UF2 SHA-256 was
+9e2e38b953623610ed7fb5ed00b249413f7e14c3dd62846fecec3bd45c61dc38.
+The bootloader reported Board-ID: tx15 before UPDATE.UF2 was copied,
+synced and unmounted. The known-good pre-update backup was preserved.
+
+The operator confirmed USB appears in the update method list and manual
+Back cancellation restores Bluetooth. Host DTR assertion then produced
+OK+BRIDGE:1,115200,READY at 115200; the host closed without sending DOWNLOAD.
+The resulting automatic-cancel UI needed an explicit canceled message.
+ROM entry, flash readback, restart, recovery, and throughput measurements
+remain pending at this point. C3 hardware and legacy CC2540 hardware have
+not been tested by this bench session.

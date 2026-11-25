@@ -73,6 +73,8 @@ class BluetoothOtaDialog : public DynamicMessageDialog
   BluetoothOtaDialog()
     : DynamicMessageDialog("Bluetooth update", []() {
         if (bluetooth.updateFailed) return std::string("Update unavailable");
+        if (bluetooth.updateMethod == Bluetooth::UPDATE_NONE)
+          return std::string("Update canceled. Returning to Bluetooth.");
         if (bluetooth.updateMethod == Bluetooth::UPDATE_UART) {
           switch (bluetooth.usbPhase) {
             case Bluetooth::USB_WAITING: return std::string("Connect radio USB to the browser installer.");
