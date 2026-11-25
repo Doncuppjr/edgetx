@@ -379,7 +379,8 @@ void Bluetooth::wakeup(void)
             state = BLUETOOTH_STATE_IDLE;
           }
           else {
-            bluetoothInit(BLUETOOTH_FACTORY_BAUDRATE, true);
+            updateCapabilities = 0;
+    bluetoothInit(BLUETOOTH_FACTORY_BAUDRATE, true);
             writeString("TTM:BPS-115200");
             state = BLUETOOTH_WAIT_BAUDRATE_CHANGE;
             waitEnd = get_tmr10ms() + 250; // 2.5s
@@ -407,11 +408,15 @@ static constexpr tmr10ms_t BT_INIT_RESET_HOLD = 15; // 150ms
 static constexpr tmr10ms_t BT_INIT_STAGE_TIMEOUT = 400; // 4 seconds
 static constexpr uint8_t BT_INIT_MAX_ATTEMPTS = 4;
 
-void Bluetooth::requestOta()
+void Bluetooth::requestOta(UpdateMethod method)
 {
   if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) return;
   // Generic AT+OTA extension; complete normal AT setup first, before
   // the module enters a binary streaming Trainer or Telemetry role.
+  if (!(updateCapabilities & method)) return;
+  updateMethod = method;
+  updatePin[0] = 0;
+  updateFailed = false;
   otaRequested = true;
   initAttemptCount = 0;
   initExhausted = false;
@@ -432,6 +437,8 @@ void Bluetooth::cancelOta()
       state != BLUETOOTH_STATE_OTA_ACTIVE) return;
 
   otaRequested = false;
+  updatePin[0] = 0;
+  updateMethod = UPDATE_NONE;
   // Pulse the existing module enable line (TX15 PH11) to request exit.
   bluetoothDisable();
   state = BLUETOOTH_STATE_OFF;
@@ -482,6 +489,9 @@ void Bluetooth::wakeup()
     return;
   }
   if (!enabledByUser) {
+    updateCapabilities = 0;
+    updatePin[0] = 0;
+    otaRequested = false;
     if (state != BLUETOOTH_STATE_OFF || initResetHold || initExhausted) {
       bluetoothDisable();
       state = BLUETOOTH_STATE_OFF;
@@ -539,11 +549,18 @@ void Bluetooth::wakeup()
       return;
     }
     char * line = readline(false);
-    if (line && !strcmp(line, "OK+OTA")) {
+    const char *prefix = updateMethod == UPDATE_BLE ? "OK+UPDATE:BLE," : "OK+UPDATE:WIFI,";
+    const size_t prefixLen = strlen(prefix);
+    bool validPin = line && !strncmp(line,prefix,prefixLen) &&
+                    strlen(line+prefixLen)==6 &&
+                    strspn(line+prefixLen,"0123456789")==6;
+    if (validPin) {
+      memcpy(updatePin,line+prefixLen,7);
       otaRequested = false;
       state = BLUETOOTH_STATE_OTA_ACTIVE;
     } else if ((line && !strcmp(line, "ERROR")) ||
                (tmr10ms_t)(now - otaRequestTime) >= 300) {
+      updateFailed = true;
       // Unsupported module or no response: fall back to ordinary startup.
       otaRequested = false;
       bluetoothDisable();
@@ -666,12 +683,31 @@ void Bluetooth::wakeup()
                 !strncmp(line, "Peripheral:", 11))) {
       writeString("AT+TXPW2");
       state = BLUETOOTH_STATE_POWER_SENT;
+    } else if (state == BLUETOOTH_STATE_POWER_SENT && line &&
+               !strncmp(line,"OK+CAPS:1,",10)) {
+      updateCapabilities = 0;
+      const char * token = line+10;
+      while (*token) {
+        size_t len = strcspn(token,",");
+        if (len==11 && !strncmp(token,"UPDATE_WIFI",len)) updateCapabilities |= UPDATE_WIFI;
+        if (len==10 && !strncmp(token,"UPDATE_BLE",len)) updateCapabilities |= UPDATE_BLE;
+        if (len==11 && !strncmp(token,"UPDATE_UART",len)) updateCapabilities |= UPDATE_UART;
+        token += len;
+        if (*token==',') ++token;
+      }
     } else if (state == BLUETOOTH_STATE_POWER_SENT &&
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
       if (otaRequested) {
-        writeString("AT+OTA");
+        if (!(updateCapabilities & updateMethod)) {
+          updateFailed = true;
+          otaRequested = false;
+          bluetoothDisable();
+          state = BLUETOOTH_STATE_OFF;
+          return;
+        }
+        writeString(updateMethod == UPDATE_BLE ? "AT+UPDATE=BLE" : "AT+UPDATE=WIFI");
         otaRequestTime = now;
         state = BLUETOOTH_STATE_OTA_WAIT_ACK;
       } else {

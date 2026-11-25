@@ -56,7 +56,7 @@ enum BluetoothStates {
 #define LEN_BLUETOOTH_ADDR              16
 #define MAX_BLUETOOTH_DISTANT_ADDR      6
 #define BLUETOOTH_PACKET_SIZE           14
-#define BLUETOOTH_LINE_LENGTH           32
+#define BLUETOOTH_LINE_LENGTH           64
 #define BLUETOOTH_TRAINER_CHANNELS      8
 
 #if defined(LOG_BLUETOOTH)
@@ -88,7 +88,12 @@ class Bluetooth
 
     void forwardTelemetry(const uint8_t * packet);
     void wakeup();
-    void requestOta();
+    enum UpdateMethod : uint8_t { UPDATE_NONE=0, UPDATE_WIFI=1, UPDATE_BLE=2, UPDATE_UART=4 };
+    void requestOta(UpdateMethod method=UPDATE_WIFI);
+    uint8_t updateCapabilities = 0;
+    UpdateMethod updateMethod = UPDATE_NONE;
+    char updatePin[7] = {};
+    bool updateFailed = false;
     void cancelOta();
     bool otaRequested = false;
     uint32_t otaRequestTime = 0;

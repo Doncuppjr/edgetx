@@ -67,12 +67,15 @@ class BTDetailsDialog : public BaseDialog
 
 // Only this specific OTA dialog uses Back as a maintenance cancel.
 // Navigating Back anywhere else retains the ordinary EdgeTX behavior.
-class BluetoothOtaDialog : public MessageDialog
+class BluetoothOtaDialog : public DynamicMessageDialog
 {
  public:
   BluetoothOtaDialog()
-    : MessageDialog("Bluetooth update",
-                    "Module update mode. Back returns to Bluetooth.")
+    : DynamicMessageDialog("Bluetooth update", []() {
+        if (bluetooth.updateFailed) return std::string("Update unavailable");
+        if (!bluetooth.updatePin[0]) return std::string("Preparing module...");
+        return std::string(bluetooth.updateMethod == Bluetooth::UPDATE_WIFI ? "Wi-Fi password: BT" : "Bluetooth PIN: ") + bluetooth.updatePin;
+      }, "Back returns to Bluetooth.")
   {
   }
 
@@ -117,12 +120,19 @@ BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& gri
   // Confirmation is required because Trainer/Telemetry will stop.
   otaBtn = new TextButton(box, rect_t{}, "Update module",
       [=]() -> uint8_t {
-        new ConfirmDialog("Bluetooth update",
-            "Stop Bluetooth and request module firmware update?",
-            [=]() {
-              bluetooth.requestOta();
-              new BluetoothOtaDialog();
-            });
+        auto menu = new Menu();
+        menu->setTitle("Module update method");
+        auto start = [](Bluetooth::UpdateMethod method) {
+          new ConfirmDialog("Bluetooth update",
+            "Stop Bluetooth and update the module?",
+            [=]() { bluetooth.requestOta(method); new BluetoothOtaDialog(); });
+        };
+        if (bluetooth.updateCapabilities & Bluetooth::UPDATE_WIFI)
+          menu->addLine("Wi-Fi", [=]() { start(Bluetooth::UPDATE_WIFI); });
+        if (bluetooth.updateCapabilities & Bluetooth::UPDATE_BLE)
+          menu->addLine("Bluetooth", [=]() { start(Bluetooth::UPDATE_BLE); });
+        if (!bluetooth.updateCapabilities)
+          menu->addLine("No supported update methods", [](){});
         return 0;
       });
   otaBtn->show(g_eeGeneral.bluetoothMode != BLUETOOTH_OFF);
