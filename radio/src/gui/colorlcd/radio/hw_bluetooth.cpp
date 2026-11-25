@@ -73,6 +73,16 @@ class BluetoothOtaDialog : public DynamicMessageDialog
   BluetoothOtaDialog()
     : DynamicMessageDialog("Bluetooth update", []() {
         if (bluetooth.updateFailed) return std::string("Update unavailable");
+        if (bluetooth.updateMethod == Bluetooth::UPDATE_UART) {
+          switch (bluetooth.usbPhase) {
+            case Bluetooth::USB_WAITING: return std::string("Connect radio USB to the browser installer.");
+            case Bluetooth::USB_RUNNING: return std::string("USB forwarding. Keep USB connected.");
+            case Bluetooth::USB_RECOVERY: return std::string("Update not confirmed. Reconnect installer to retry, or power-cycle module.");
+            case Bluetooth::USB_RESTARTING: return std::string("Checking module restart...");
+            case Bluetooth::USB_RESTORED: return std::string("Module restarted. Bluetooth restored.");
+            default: break;
+          }
+        }
         if (!bluetooth.updatePin[0]) return std::string("Preparing module...");
         return std::string(bluetooth.updateMethod == Bluetooth::UPDATE_WIFI ? "Wi-Fi password: BT" : "Bluetooth PIN: ") + bluetooth.updatePin;
       }, "Back returns to Bluetooth.")
@@ -83,7 +93,7 @@ class BluetoothOtaDialog : public DynamicMessageDialog
   void onCancel() override
   {
     bluetooth.cancelOta();
-    deleteLater();
+    if (bluetooth.usbPhase != Bluetooth::USB_RECOVERY) deleteLater();
   }
   void onClicked() override { onCancel(); }
 };
@@ -131,6 +141,10 @@ BluetoothConfigWindow::BluetoothConfigWindow(Window* parent, FlexGridLayout& gri
           menu->addLine("Wi-Fi", [=]() { start(Bluetooth::UPDATE_WIFI); });
         if (bluetooth.updateCapabilities & Bluetooth::UPDATE_BLE)
           menu->addLine("Bluetooth", [=]() { start(Bluetooth::UPDATE_BLE); });
+#if defined(BLUETOOTH_USB_UPDATE)
+        if (bluetooth.updateCapabilities & Bluetooth::UPDATE_UART)
+          menu->addLine("USB", [=]() { start(Bluetooth::UPDATE_UART); });
+#endif
         if (!bluetooth.updateCapabilities)
           menu->addLine("No supported update methods", [](){});
         return 0;

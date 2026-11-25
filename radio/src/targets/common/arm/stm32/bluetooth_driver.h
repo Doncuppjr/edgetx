@@ -50,3 +50,18 @@ void bluetoothDisable();
 #else
   #define IS_BLUETOOTH_CHIP_PRESENT()     (true)
 #endif
+
+#if defined(USB_SERIAL)
+struct BluetoothUsbStats {
+  uint32_t toModule, toHost, rxHighWater, txHighWater, usbPendingHighWater;
+  uint32_t overruns, uartErrors, serviceGapMaxUs, hostQueueMaxUs, moduleQueueMaxUs;
+};
+bool bluetoothUsbStart();
+void bluetoothUsbStop();
+bool bluetoothUsbOpen();
+bool bluetoothUsbRomRequested();
+bool bluetoothUsbFinishRequested();
+bool bluetoothUsbRecovery();
+void bluetoothUsbSetRecovery();
+BluetoothUsbStats bluetoothUsbStats();
+#endif

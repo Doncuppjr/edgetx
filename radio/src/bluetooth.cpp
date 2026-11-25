@@ -25,6 +25,10 @@
 #include "bluetooth_driver.h"
 #include "os/sleep.h"
 #include "trainer.h"
+#if defined(BLUETOOTH_USB_UPDATE)
+#include "hal/usb_driver.h"
+#include "serial.h"
+#endif
 
 #if defined(LOG_BLUETOOTH)
 extern FIL g_bluetoothFile;
@@ -293,7 +297,8 @@ void Bluetooth::forwardTelemetry(const uint8_t * packet)
 {
   // Do not interleave live Telemetry with AT negotiation or module updating.
   if (otaRequested || state == BLUETOOTH_STATE_OTA_WAIT_ACK ||
-      state == BLUETOOTH_STATE_OTA_ACTIVE) return;
+      state == BLUETOOTH_STATE_OTA_ACTIVE ||
+      state == BLUETOOTH_STATE_USB_ACTIVE || usbPhase == USB_RESTARTING) return;
   crc = 0x00;
 
   buffer[bufferIndex++] = START_STOP; // start byte
@@ -410,11 +415,29 @@ static constexpr uint8_t BT_INIT_MAX_ATTEMPTS = 4;
 
 void Bluetooth::requestOta(UpdateMethod method)
 {
+  if (state == BLUETOOTH_STATE_USB_ACTIVE) return;
   if (g_eeGeneral.bluetoothMode == BLUETOOTH_OFF) return;
   // Generic AT+OTA extension; complete normal AT setup first, before
   // the module enters a binary streaming Trainer or Telemetry role.
   if (!(updateCapabilities & method)) return;
   updateMethod = method;
+  usbPhase = USB_NONE;
+#if defined(BLUETOOTH_USB_UPDATE)
+  if (method == UPDATE_UART) {
+    // Physical menu selection authorizes this session and selects CDC;
+    // this does not depend on CLI being present.
+    bool started = usbStarted();
+    if (started) {
+      if (getSelectedUsbMode() == USB_SERIAL_MODE) serialStop(SP_VCP);
+      usbStop();
+    }
+    setSelectedUsbMode(USB_SERIAL_MODE);
+    if (usbPlugged()) {
+      serialInit(SP_VCP, serialGetMode(SP_VCP));
+      usbStart();
+    }
+  }
+#endif
   updatePin[0] = 0;
   updateFailed = false;
   otaRequested = true;
@@ -432,9 +455,21 @@ void Bluetooth::requestOta(UpdateMethod method)
 
 void Bluetooth::cancelOta()
 {
+#if defined(BLUETOOTH_USB_UPDATE)
+  if (state == BLUETOOTH_STATE_USB_ACTIVE) {
+    if (bluetoothUsbRomRequested() && !bluetoothUsbFinishRequested()) {
+      // PH11 cannot reset a chip executing ROM. Preserve a retry route;
+      // never feed normal AT initialization into a bootloader.
+      bluetoothUsbSetRecovery(); usbPhase = USB_RECOVERY; return;
+    }
+    bluetoothUsbStop();
+    usbPhase = USB_NONE;
+  }
+#endif
   if (!otaRequested &&
       state != BLUETOOTH_STATE_OTA_WAIT_ACK &&
-      state != BLUETOOTH_STATE_OTA_ACTIVE) return;
+      state != BLUETOOTH_STATE_OTA_ACTIVE &&
+      state != BLUETOOTH_STATE_USB_ACTIVE) return;
 
   otaRequested = false;
   updatePin[0] = 0;
@@ -456,6 +491,39 @@ void Bluetooth::cancelOta()
 
 void Bluetooth::wakeup()
 {
+#if defined(BLUETOOTH_USB_UPDATE)
+  if (state == BLUETOOTH_STATE_USB_ACTIVE) {
+    // handleUsbConnection resets this on cable removal. Keep retries in CDC,
+    // even if the user's normal USB default is joystick or mass storage.
+    if (!usbStarted()) setSelectedUsbMode(USB_SERIAL_MODE);
+    auto now = get_tmr10ms();
+    auto stats = bluetoothUsbStats();
+    uint32_t total = stats.toHost + stats.toModule;
+    if (total != usbTransferred) { usbTransferred = total; otaRequestTime = now; }
+    if (bluetoothUsbFinishRequested()) {
+      // Host has verified flash contents and requested the module's software
+      // restart. Success is not displayed until the normal AT role handshake.
+      cancelOta();
+      updateMethod = UPDATE_UART; usbPhase = USB_RESTARTING;
+      return;
+    }
+    bool open = bluetoothUsbOpen();
+    if (open) usbHostSeen = true;
+    if (bluetoothUsbRecovery() ||
+        (bluetoothUsbRomRequested() &&
+         (tmr10ms_t)(now - otaRequestTime) >= 30000)) {
+      bluetoothUsbSetRecovery(); usbPhase = USB_RECOVERY;
+    } else if (!bluetoothUsbRomRequested() &&
+               ((usbHostSeen && !open) ||
+                g_eeGeneral.bluetoothMode == BLUETOOTH_OFF ||
+                (tmr10ms_t)(now - otaRequestTime) >= 12000)) {
+      cancelOta();
+    } else {
+      usbPhase = bluetoothUsbRomRequested() ? USB_RUNNING : USB_WAITING;
+    }
+    return;
+  }
+#endif
   if (state != BLUETOOTH_STATE_OFF) {
     if (bluetoothIsWriting()) {
       return;
@@ -549,6 +617,16 @@ void Bluetooth::wakeup()
       return;
     }
     char * line = readline(false);
+#if defined(BLUETOOTH_USB_UPDATE)
+    if (updateMethod == UPDATE_UART && line && !strcmp(line, "OK+UPDATE:UART")) {
+      if (bluetoothUsbStart()) {
+        otaRequested = false; state = BLUETOOTH_STATE_USB_ACTIVE;
+        usbPhase = USB_WAITING; usbHostSeen = false; usbTransferred = 0;
+        otaRequestTime = now; return;
+      }
+      updateFailed = true; cancelOta(); return;
+    }
+#endif
     const char *prefix = updateMethod == UPDATE_BLE ? "OK+UPDATE:BLE," : "OK+UPDATE:WIFI,";
     const size_t prefixLen = strlen(prefix);
     bool validPin = line && !strncmp(line,prefix,prefixLen) &&
@@ -691,7 +769,9 @@ void Bluetooth::wakeup()
         size_t len = strcspn(token,",");
         if (len==11 && !strncmp(token,"UPDATE_WIFI",len)) updateCapabilities |= UPDATE_WIFI;
         if (len==10 && !strncmp(token,"UPDATE_BLE",len)) updateCapabilities |= UPDATE_BLE;
+#if defined(BLUETOOTH_USB_UPDATE)
         if (len==11 && !strncmp(token,"UPDATE_UART",len)) updateCapabilities |= UPDATE_UART;
+#endif
         token += len;
         if (*token==',') ++token;
       }
@@ -707,7 +787,8 @@ void Bluetooth::wakeup()
           state = BLUETOOTH_STATE_OFF;
           return;
         }
-        writeString(updateMethod == UPDATE_BLE ? "AT+UPDATE=BLE" : "AT+UPDATE=WIFI");
+        writeString(updateMethod == UPDATE_UART ? "AT+UPDATE=UART" :
+                    updateMethod == UPDATE_BLE ? "AT+UPDATE=BLE" : "AT+UPDATE=WIFI");
         otaRequestTime = now;
         state = BLUETOOTH_STATE_OTA_WAIT_ACK;
       } else {
@@ -723,6 +804,7 @@ void Bluetooth::wakeup()
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
       state = BLUETOOTH_STATE_IDLE;
+      if (usbPhase == USB_RESTARTING) usbPhase = USB_RESTORED;
       // Successful AT role setup closes the startup retry window. Keep
       // postInitRecoveryUsed independent, so a late ERROR cannot trigger
       // an unlimited number of additional startup sequences.
@@ -1057,6 +1139,9 @@ const char * Bluetooth::doFlashFirmware(const char * filename, ProgressHandler p
 
 const char * Bluetooth::flashFirmware(const char * filename, ProgressHandler progressHandler)
 {
+  if (otaRequested || state == BLUETOOTH_STATE_USB_ACTIVE ||
+      state == BLUETOOTH_STATE_OTA_WAIT_ACK || state == BLUETOOTH_STATE_OTA_ACTIVE)
+    return "Bluetooth UART owned by maintenance";
   progressHandler(getBasename(filename), STR_MODULE_RESET, 0, 0);
 
   state = BLUETOOTH_STATE_FLASH_FIRMWARE;

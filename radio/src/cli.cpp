@@ -1738,6 +1738,26 @@ int cliSpaceMouse(const char ** argv)
 int cliBlueTooth(const char ** argv)
 {
   int baudrate = 0;
+#if defined(BLUETOOTH_USB_UPDATE)
+  if (!strcmp(argv[1], "usbstatus")) {
+    auto s = bluetoothUsbStats();
+    cliSerialPrint("BTUSB tx=%lu rx=%lu rxHwm=%lu txHwm=%lu usbHwm=%lu overrun=%lu uartError=%lu gapUs=%lu hostAgeUs=%lu moduleAgeUs=%lu phase=%u",
+      (unsigned long)s.toModule, (unsigned long)s.toHost,
+      (unsigned long)s.rxHighWater, (unsigned long)s.txHighWater,
+      (unsigned long)s.usbPendingHighWater, (unsigned long)s.overruns,
+      (unsigned long)s.uartErrors, (unsigned long)s.serviceGapMaxUs,
+      (unsigned long)s.hostQueueMaxUs, (unsigned long)s.moduleQueueMaxUs,
+      (unsigned)bluetooth.usbPhase);
+    return 0;
+  }
+#endif
+  if (bluetooth.otaRequested ||
+      bluetooth.state == BLUETOOTH_STATE_OTA_WAIT_ACK ||
+      bluetooth.state == BLUETOOTH_STATE_OTA_ACTIVE ||
+      bluetooth.state == BLUETOOTH_STATE_USB_ACTIVE) {
+    cliSerialPrint("Bluetooth UART owned by maintenance");
+    return -1;
+  }
   if (!strncmp(argv[1], "AT", 2) || !strncmp(argv[1], "TTM", 3)) {
     bluetooth.writeString(argv[1]);
     char * line = bluetooth.readline();

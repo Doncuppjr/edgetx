@@ -24,6 +24,10 @@
 #include <stdint.h>
 #include "popups.h"
 
+#if defined(USB_SERIAL) && !defined(SIMU) && !defined(PCBX9E)
+#define BLUETOOTH_USB_UPDATE
+#endif
+
 
 enum BluetoothStates {
 #if defined(PCBX9E)
@@ -50,6 +54,7 @@ enum BluetoothStates {
   BLUETOOTH_STATE_CLEAR_REQUESTED,
   BLUETOOTH_STATE_FLASH_FIRMWARE,
   BLUETOOTH_STATE_OTA_WAIT_ACK,
+  BLUETOOTH_STATE_USB_ACTIVE,
   BLUETOOTH_STATE_OTA_ACTIVE
 };
 
@@ -95,6 +100,12 @@ class Bluetooth
     char updatePin[7] = {};
     bool updateFailed = false;
     void cancelOta();
+    enum UsbPhase : uint8_t { USB_NONE, USB_WAITING, USB_RUNNING,
+                              USB_RECOVERY, USB_RESTARTING, USB_RESTORED };
+    UsbPhase usbPhase = USB_NONE;
+    bool usbHostSeen = false;
+    uint32_t usbTransferred = 0;
+
     bool otaRequested = false;
     uint32_t otaRequestTime = 0;
     const char * flashFirmware(const char * filename, ProgressHandler progressHandler);
