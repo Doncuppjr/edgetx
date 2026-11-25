@@ -219,3 +219,57 @@ was sampled after module boot and must not be described as an error-free session
 Protocol 2 removes dependence on RTS and acknowledges FINISH through the
 serial data channel on a fresh connection. This correction and its installer
 counterpart still require CI and hardware validation.
+
+## Protocol-2 hardware results (2026-11-25 UTC)
+
+EdgeTX 0925e24aa69d8978c54dceb26529aebb2dc15e93 passed pipeline 2714.
+Its UF2 SHA-256 was
+57ccb44be66e253fb239640768a159876020e43bdb334b06ab8a155f524c8901.
+The bootloader reported Board-ID tx15; the image was copied, synced and
+unmounted at 19:15 UTC. Anchor installer commit 3eb142c passed pipeline 2715
+for all firmware variants, host tests and installer packaging.
+
+A no-write C5 identification/watchdog session received OK+BRIDGE:FINISH
+after reopening the serial port, and the operator confirmed "Module
+restarted. Bluetooth restored." CLI status also reported USB phase 5.
+
+An intentional interrupted write then acknowledged one compressed ROM
+block and sent only 528 bytes of the next frame before closing DTR/port.
+The next connection returned RECOVERY and synchronized with C5 again.
+The complete 8 MiB CI95 image was rewritten, passed esptool's readback plus
+a second explicit whole-image MD5, and received the FINISH acknowledgment
+after watchdog restart. The operator again confirmed Bluetooth restoration.
+Reported write time was 125.2 seconds; write plus first verification was
+140.578 seconds.
+
+Post-recovery counters: UART TX 1090679 bytes, RX 17083, RX high water 12/255,
+TX high water 63/63, USB packet high water 64, zero RX overruns, zero UART
+errors, maximum USB service gap 1028 us, maximum host-packet age 5951 us,
+maximum module-queue age 1005 us, USB phase 5. These counters include the
+interrupted attempt, protocol overhead and restart. They do not justify
+increasing the normal Bluetooth FIFO sizes.
+
+A separate no-write ROM session tested physically unplugging and reconnecting
+the Windows USB cable while the radio remained powered. The port reappeared,
+RECOVERY synchronized, watchdog restart and FINISH were acknowledged, and
+the operator confirmed Bluetooth restoration. No Emergency mode was
+reported during this tested reconnect cycle.
+
+The operator confirmed head-tracker channel movement with the expected
+mapping/direction after the USB updates. Radio power cycle with the tracker
+already on, and tracker power cycle with the radio already on, both restored
+channel movement automatically without pairing again.
+
+Back dismissal remains intermittent: several early sessions closed on one
+press, but after the cable-reconnect session the operator reported several
+physical RTN presses and a delay before dismissal. Do not mark this UX issue
+resolved. A host test of the production Layer stack reproduced deletion of
+the wrong layer/focus group when removing a non-top popup. A separate fix
+repairs removal and restoration references; its host test passes, but its
+relationship to the hardware delay still needs validation after installation.
+
+The bench also exposed an early-open race during radio AT preparation. No
+ROM request was sent by that failed attempt. The installer now polls the
+non-establishing STATUS query until maintenance is ready before sending its
+single PROBE/DOWNLOAD sequence. This preparation change passes 15 JS host tests.
+Browser end-to-end testing remains pending.
