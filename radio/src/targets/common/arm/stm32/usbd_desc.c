@@ -296,6 +296,8 @@ uint8_t * USBD_FS_DeviceDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
   UNUSED(speed);
 
   int vid, pid;
+  uint8_t deviceClass = 0;
+  uint8_t deviceSubClass = 0;
 
   /* version has to be bcd coded */
   uint8_t version_minor = ((VERSION_MINOR / 10) << 4) | (VERSION_MINOR % 10);
@@ -310,6 +312,11 @@ uint8_t * USBD_FS_DeviceDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
     case USB_SERIAL_MODE:
       vid = USBD_CDC_VID;
       pid = USBD_CDC_PID;
+      // Serial mode is one CDC ACM function spanning control and data
+      // interfaces. Bind the whole device to the host CDC driver; class zero
+      // lets Windows split those interfaces into unrelated child devices.
+      deviceClass = 0x02;
+      deviceSubClass = 0x02;
       break;
 
     case USB_MASS_STORAGE_MODE:
@@ -337,8 +344,8 @@ uint8_t * USBD_FS_DeviceDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
       USB_DESC_TYPE_DEVICE,       /*bDescriptorType*/
       0x00,                       /*bcdUSB USB specification release number in binary-coded decimal*/
       0x02,
-      0x00,                       /*bDeviceClass*/
-      0x00,                       /*bDeviceSubClass*/
+      deviceClass,                /*bDeviceClass*/
+      deviceSubClass,             /*bDeviceSubClass*/
       0x00,                       /*bDeviceProtocol*/
       USB_MAX_EP0_SIZE,           /*bMaxPacketSize*/
       LOBYTE(vid),                /*idVendor*/

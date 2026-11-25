@@ -121,8 +121,8 @@ __ALIGN_BEGIN static uint8_t USBD_CDC_DeviceQualifierDesc[USB_LEN_DEV_QUALIFIER_
   USB_DESC_TYPE_DEVICE_QUALIFIER,
   0x00,
   0x02,
-  0x00,
-  0x00,
+  0x02, /* CDC device class, matching the serial device descriptor */
+  0x02, /* Abstract Control Model */
   0x00,
   0x40,
   0x01,
