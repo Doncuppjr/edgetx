@@ -350,3 +350,23 @@ BLE application update and restart. This closes the post-restart functional
 check for that Linux BLE protocol test. No separate assertion is made about
 Back-button timing after this BLE session. Browser end-to-end validation and
 the untested hardware regressions remain pending.
+
+## Fresh Wi-Fi OTA regression (2026-11-25 UTC)
+
+Using the latest installed TX15 firmware, AiPal joined the module's known
+ANCHOR Chain access point while maintaining its Ethernet connection.
+The CI95 C5 application was checked before upload: 1663632 bytes, SHA-256
+44768d537140ac78b26ce09c9e5e3d5528afd6943db57ca93f7a6ab80ec51284.
+
+A 64-byte invalid application was rejected with HTTP 400 and
+"Firmware upload failed; existing firmware retained." A subsequent valid
+application upload in the same session completed in 11.893 seconds with
+HTTP 200 and "Update verified. ANCHOR will restart." This exercised image
+rejection, recovery to a valid upload, module validation and restart request.
+The operator confirmed Trainer channels returned normally after leaving the
+Wi-Fi update dialog and completing restart.
+
+The temporary NetworkManager connection was deleted, and AiPal's normal
+Wi-Fi connection was restored. Ethernet remained connected. Evidence is
+saved as wifi-final-update-result.json in the bench directory. No firmware
+source change was needed for this regression.
