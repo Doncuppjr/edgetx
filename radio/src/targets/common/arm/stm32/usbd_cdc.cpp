@@ -273,6 +273,14 @@ static int8_t VCP_StartOfFrame_FS()
   uint8_t result = USBD_OK;
   static uint8_t FrameCount = 0;    // modified by OpenTX
 
+  // A reset/deconfiguration can overlap main-task class teardown. Match the
+  // CDC core's current class instance and do not touch buffers while offline.
+  if (!cdcConnected || hUsbDevice.dev_state != USBD_STATE_CONFIGURED)
+    return USBD_OK;
+  auto hcdc = (USBD_CDC_HandleTypeDef*)
+      hUsbDevice.pClassDataCmsit[hUsbDevice.classId];
+  if (!hcdc) return USBD_OK;
+
   // A maintenance bridge is serviced every USB frame (1ms on FS), not
   // by the 50ms Bluetooth command cadence. Work per frame is bounded.
   if (maintenancePoll) maintenancePoll();
@@ -283,8 +291,6 @@ static int8_t VCP_StartOfFrame_FS()
     FrameCount = 0;
 
     /* Check the data to be sent through IN pipe */
-    USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDevice.pClassData;
-
     if (hcdc->TxState != 0)
       return USBD_OK;
 

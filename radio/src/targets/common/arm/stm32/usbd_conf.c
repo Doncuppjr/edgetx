@@ -89,6 +89,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
 
     /* Peripheral interrupt init */
     NVIC_SetPriority(OTG_HS_IRQn, 11);
+    NVIC_ClearPendingIRQ(OTG_HS_IRQn);
     NVIC_EnableIRQ(OTG_HS_IRQn);
   }
 #else
@@ -104,6 +105,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
 
     /* Peripheral interrupt init */
     NVIC_SetPriority(OTG_FS_IRQn, 11);
+    NVIC_ClearPendingIRQ(OTG_FS_IRQn);
     NVIC_EnableIRQ(OTG_FS_IRQn);
   }
 #endif
@@ -121,23 +123,27 @@ void HAL_PCD_MspDeInit(PCD_HandleTypeDef* pcdHandle)
 #if defined(USE_USB_HS)
   if(pcdHandle->Instance==USB_OTG_HS)
   {
-    /* Peripheral clock disable */
+    // A latched OTG IRQ must not run after its peripheral is clock-gated.
+    NVIC_DisableIRQ(OTG_HS_IRQn);
+    __DSB();
+    __ISB();
+    NVIC_ClearPendingIRQ(OTG_HS_IRQn);
     __HAL_RCC_USB_OTG_HS_CLK_DISABLE();
 #if defined(STM32H7) || defined(STM32H7RS)
     __HAL_RCC_USBPHYC_CLK_DISABLE();
 #endif
-
-    /* Peripheral interrupt Deinit*/
-    NVIC_DisableIRQ(OTG_HS_IRQn);
+    NVIC_ClearPendingIRQ(OTG_HS_IRQn);
   }
 #else
   if(pcdHandle->Instance==USB_OTG_FS)
   {
-    /* Peripheral clock disable */
-    __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
-
-    /* Peripheral interrupt Deinit*/
+    // Disable and drain the IRQ before gating registers it can access.
     NVIC_DisableIRQ(OTG_FS_IRQn);
+    __DSB();
+    __ISB();
+    NVIC_ClearPendingIRQ(OTG_FS_IRQn);
+    __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
+    NVIC_ClearPendingIRQ(OTG_FS_IRQn);
   }
 #endif
 }
