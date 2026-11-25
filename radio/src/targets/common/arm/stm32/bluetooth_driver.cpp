@@ -137,6 +137,7 @@ DEFINE_STM32_SERIAL_PORT(BTMaintenance, btUSART, 256, 64);
 static BluetoothUsbStats btUsbCounters = {};
 static volatile bool btUsbRom = false, btUsbRecover = false, btUsbFinish = false;
 static bool btUsbWasOpen = false, btUsbRtsLow = false;
+static volatile bool btUsbSessionSeen = false;
 static uint32_t btUsbLastCycle = 0, btUsbOverrunBase = 0, btUsbErrorBase = 0;
 static BluetoothUsbHandshake btUsbHandshake;
 
@@ -194,15 +195,17 @@ static void bluetoothUsbPoll()
       usbSerialMaintenanceConsume();
       auto event = btUsbHandshake.feed(byte);
       if (event == BluetoothUsbHandshake::PROBE) {
+        btUsbSessionSeen = true;
         const char* banner = btUsbRom ? "OK+BRIDGE:1,115200,RECOVERY\r\n" :
                                        "OK+BRIDGE:1,115200,READY\r\n";
         for (const char* c=banner; *c; ++c) usbSerialMaintenanceWrite(*c);
       } else if (event == BluetoothUsbHandshake::STATUS) {
         char status[240];
         snprintf(status,sizeof(status),
-          "OK+BRIDGE:STATUS,tx=%lu,rx=%lu,overrun=%lu,error=%lu,rxHwm=%lu,txHwm=%lu,gapUs=%lu,rom=%u\r\n",
+          "OK+BRIDGE:STATUS,tx=%lu,rx=%lu,overrun=%lu,error=%lu,txPending=%lu,rxHwm=%lu,txHwm=%lu,gapUs=%lu,rom=%u\r\n",
           (unsigned long)btUsbCounters.toModule,(unsigned long)btUsbCounters.toHost,
           (unsigned long)btUsbCounters.overruns,(unsigned long)btUsbCounters.uartErrors,
+          (unsigned long)stm32SerialTxPending(_bt_usart_ctx),
           (unsigned long)btUsbCounters.rxHighWater,(unsigned long)btUsbCounters.txHighWater,
           (unsigned long)btUsbCounters.serviceGapMaxUs,(unsigned)btUsbRom);
         for (const char* c=status; *c; ++c) usbSerialMaintenanceWrite(*c);
@@ -239,7 +242,7 @@ bool bluetoothUsbStart()
   _bt_usart_ctx = STM32SerialDriver.init(REF_STM32_SERIAL_PORT(BTMaintenance), &cfg);
   btUsbCounters = {};
   btUsbRom = btUsbRecover = btUsbFinish = btUsbWasOpen = btUsbRtsLow = false;
-  btUsbLastCycle = 0; btUsbHandshake.reset();
+  btUsbLastCycle = 0; btUsbHandshake.reset(); btUsbSessionSeen = false;
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
   btMaintenance = _bt_usart_ctx != nullptr;
@@ -256,7 +259,7 @@ void bluetoothUsbStop()
   if (!prim) __enable_irq();
 }
 bool bluetoothUsbOpen() { return usbSerialMaintenanceOpen(); }
-bool bluetoothUsbSessionStarted() { return btUsbHandshake.ready(); }
+bool bluetoothUsbSessionStarted() { return btUsbSessionSeen; }
 bool bluetoothUsbRomRequested() { return btUsbRom; }
 bool bluetoothUsbFinishRequested() { return btUsbFinish; }
 bool bluetoothUsbRecovery() { return btUsbRecover; }
