@@ -1,0 +1,24 @@
+stages: [build]
+tx15:
+  stage: build
+  image: ghcr.io/edgetx/edgetx-dev:2.12
+  interruptible: true
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+    GIT_SUBMODULE_DEPTH: "0"
+    FLAVOR: tx15
+    CMAKE_BUILD_PARALLEL_LEVEL: "8"
+    EXTRA_OPTIONS: "-DCLI=ON -DBLUETOOTH=ON -DINTERNAL_GPS=ON"
+    FIRMARE_TARGET: firmware
+  script:
+    - export SRCDIR="$CI_PROJECT_DIR"
+    - export EDGETX_VERSION_SUFFIX="gitlab-$CI_COMMIT_SHORT_SHA"
+    - ./tools/build-gh.sh
+    - ls -lh *.uf2
+    - sha256sum *.uf2 > SHA256SUMS
+  artifacts:
+    name: "TX15-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - "*.uf2"
+      - SHA256SUMS
+    expire_in: 30 days
