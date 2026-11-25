@@ -50,25 +50,24 @@ void Layer::push(Window* w)
 
 void Layer::pop(Window* w)
 {
-  if (stack.empty()) return;
+  for (auto layer = stack.begin(); layer != stack.end(); ++layer) {
+    if (layer->window != w) continue;
 
-  if (back() == w) {
-    lv_group_t* prevGroup = stack.back().prevGroup;
-    if (prevGroup) {
-      _assign_lv_group(prevGroup);
-    } else if (!stack.empty()) {
-      _assign_lv_group(stack.back().group);
+    auto above = layer;
+    ++above;
+    if (above == stack.end()) {
+      // Restore input devices before destroying the active group's storage.
+      // nullptr is valid when removing the last layer.
+      _assign_lv_group(layer->prevGroup);
     } else {
-      lv_group_set_default(NULL);
-    }
-    stack.pop_back();
-  } else {
-    for (auto layer = stack.crbegin(); layer != stack.crend(); layer++) {
-      if (layer->window == w) {
-        stack.erase(layer.base());
-        return;
+      // A USB/menu popup can disappear below another modal. Repair every
+      // restoration reference to its group before that group is destroyed.
+      for (; above != stack.end(); ++above) {
+        if (above->prevGroup == layer->group)
+          above->prevGroup = layer->prevGroup;
       }
     }
+    stack.erase(layer);
     return;
   }
 }

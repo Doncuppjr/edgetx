@@ -16,6 +16,7 @@ tx15:
     - /tmp/test-usb-packet
     - g++ -std=c++17 -Wall -Wextra -Werror tests/usb-maintenance/test_caps.cpp -o /tmp/test-bt-caps
     - /tmp/test-bt-caps
+    - python3 tests/gui-layer/test_layer.py
     - export SRCDIR="$CI_PROJECT_DIR"
     - export EDGETX_VERSION_SUFFIX="gitlab-$CI_COMMIT_SHORT_SHA"
     - ./tools/build-gh.sh
