@@ -104,6 +104,7 @@ class Bluetooth
                               USB_RECOVERY, USB_RESTARTING, USB_RESTORED };
     UsbPhase usbPhase = USB_NONE;
     bool usbHostSeen = false;
+    bool usbRoleAckSeen = false;
     uint32_t usbTransferred = 0;
 
     bool otaRequested = false;

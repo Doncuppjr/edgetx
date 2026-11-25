@@ -658,6 +658,9 @@ void Bluetooth::wakeup()
       initObservedState = state;
       initStateEntered = now;
     } else if ((tmr10ms_t)(now - initStateEntered) >= BT_INIT_STAGE_TIMEOUT) {
+      if (otaRequested) {
+        updateFailed = true; cancelOta(); return;
+      }
       bluetoothDisable();
       state = BLUETOOTH_STATE_OFF;
       initObservedState = 0xff;
@@ -742,6 +745,17 @@ void Bluetooth::wakeup()
   }
   else {
     char * line = readline();
+    // NAME can leave a Central: line queued ahead of the TXPW reply.
+    // Accept passive capabilities during ROLE_SENT too; regular legacy
+    // initialization need not wait for an extension it never announces.
+    if ((state == BLUETOOTH_STATE_POWER_SENT || state == BLUETOOTH_STATE_ROLE_SENT) &&
+        line && !strncmp(line, "OK+CAPS:1,", 10)) {
+      updateCapabilities = bluetoothParseUpdateCaps(line);
+#if !defined(BLUETOOTH_USB_UPDATE)
+      updateCapabilities &= ~UPDATE_UART;
+#endif
+      return;
+    }
     if (state == BLUETOOTH_STATE_BAUDRATE_INIT) {
       char command[32];
       char * cur = strAppend(command, BLUETOOTH_COMMAND_NAME);
@@ -765,22 +779,15 @@ void Bluetooth::wakeup()
       updateCapabilities = 0;
       writeString("AT+TXPW2");
       state = BLUETOOTH_STATE_POWER_SENT;
-    } else if (state == BLUETOOTH_STATE_POWER_SENT && line &&
-               !strncmp(line,"OK+CAPS:1,",10)) {
-      updateCapabilities = bluetoothParseUpdateCaps(line);
-#if !defined(BLUETOOTH_USB_UPDATE)
-      updateCapabilities &= ~UPDATE_UART;
-#endif
     } else if (state == BLUETOOTH_STATE_POWER_SENT &&
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
       if (otaRequested) {
         if (!(updateCapabilities & updateMethod)) {
-          updateFailed = true;
-          otaRequested = false;
-          bluetoothDisable();
-          state = BLUETOOTH_STATE_OFF;
+          // This can be NAME's stale Central:. Await the fresh TXPW
+          // announcement/identity; the initialization watchdog bounds a
+          // legacy/unsupported module without sending any update command.
           return;
         }
         writeString(updateMethod == UPDATE_UART ? "AT+UPDATE=UART" :
@@ -793,12 +800,17 @@ void Bluetooth::wakeup()
           writeString("AT+ROLE1");
         else
           writeString("AT+ROLE0");
+        usbRoleAckSeen = false;
         state = BLUETOOTH_STATE_ROLE_SENT;
       }
+    } else if (state == BLUETOOTH_STATE_ROLE_SENT && line &&
+               !strncmp(line, "OK+Role:", 8)) {
+      usbRoleAckSeen = true;
     } else if (state == BLUETOOTH_STATE_ROLE_SENT &&
                (line != nullptr) &&
                (!strncmp(line, "Central:", 8) ||
                 !strncmp(line, "Peripheral:", 11))) {
+      if (usbPhase == USB_RESTARTING && !usbRoleAckSeen) return;
       state = BLUETOOTH_STATE_IDLE;
       if (usbPhase == USB_RESTARTING) usbPhase = USB_RESTORED;
       // Successful AT role setup closes the startup retry window. Keep
