@@ -430,16 +430,13 @@ void Bluetooth::requestOta(UpdateMethod method)
   if (method == UPDATE_UART) {
     // Physical menu selection authorizes this session and selects CDC;
     // this does not depend on CLI being present.
-    bool started = usbStarted();
-    if (started) {
-      if (getSelectedUsbMode() == USB_SERIAL_MODE) serialStop(SP_VCP);
+    // Preserve an existing CDC connection: restarting it unnecessarily
+    // disconnects the host and races its re-enumeration. If switching away
+    // from another USB class, stop it once and let handleUsbConnection()
+    // perform serialInit()/usbStart() on the normal USB task path.
+    if (usbStarted() && getSelectedUsbMode() != USB_SERIAL_MODE)
       usbStop();
-    }
     setSelectedUsbMode(USB_SERIAL_MODE);
-    if (usbPlugged()) {
-      serialInit(SP_VCP, serialGetMode(SP_VCP));
-      usbStart();
-    }
   }
 #endif
   updatePin[0] = 0;
